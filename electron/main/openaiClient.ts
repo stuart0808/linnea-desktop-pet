@@ -1,8 +1,15 @@
 import OpenAI from "openai";
 import type { ModelStructuredResult, SelectionTextAction } from "../../shared/types.js";
 
+interface AiClientConfig {
+  apiKey?: string;
+  baseURL?: string;
+  model: string;
+  providerName?: string;
+}
+
 const fallbackResult = (text: string): ModelStructuredResult => ({
-  replyText: "我已经记下你说的内容了。现在还没有配置 DeepSeek API Key，所以先用本地规则帮你做基础记录。",
+  replyText: "我已经记下你说的内容了。现在还没有配置模型 API Key，所以先用本地规则帮你做基础记录。",
   mood: "thinking",
   taskIntent: "simple_todo",
   todoCandidates: localTodoExtract(text)
@@ -10,7 +17,9 @@ const fallbackResult = (text: string): ModelStructuredResult => ({
 
 export async function askPetAssistant(params: {
   apiKey?: string;
+  baseURL?: string;
   model: string;
+  providerName?: string;
   text: string;
   nowIso: string;
   localTimeText: string;
@@ -18,10 +27,7 @@ export async function askPetAssistant(params: {
 }): Promise<ModelStructuredResult> {
   if (!params.apiKey) return fallbackResult(params.text);
 
-  const client = new OpenAI({
-    apiKey: params.apiKey,
-    baseURL: "https://api.deepseek.com"
-  });
+  const client = createAiClient(params);
 
   const response = await client.chat.completions.create({
     model: params.model,
@@ -40,13 +46,15 @@ export async function askPetAssistant(params: {
   });
 
   const outputText = response.choices[0]?.message?.content;
-  if (!outputText) throw new Error("DeepSeek returned an empty response");
+  if (!outputText) throw new Error(`${params.providerName ?? "模型服务"} returned an empty response`);
   return normalizeModelResult(JSON.parse(outputText));
 }
 
 export async function summarizeRecentContext(params: {
   apiKey?: string;
+  baseURL?: string;
   model: string;
+  providerName?: string;
   nowIso: string;
   localTimeText: string;
   timeZone: string;
@@ -79,14 +87,11 @@ export async function summarizeRecentContext(params: {
     .slice(-12);
   if (!params.apiKey) {
     return todayTodos.length
-      ? `当前没有配置 DeepSeek API Key。根据本地数据，今天需要处理：${todayTodos.slice(0, 6).map((todo) => todo.title).join("；")}。建议先处理已过期或有明确提醒时间的事项，再整理剩余任务。`
-      : "当前没有配置 DeepSeek API Key。根据本地数据，今天没有明确待完成事项。建议检查是否有遗漏任务，并保留一段时间处理临时事项。";
+      ? `当前没有配置模型 API Key。根据本地数据，今天需要处理：${todayTodos.slice(0, 6).map((todo) => todo.title).join("；")}。建议先处理已过期或有明确提醒时间的事项，再整理剩余任务。`
+      : "当前没有配置模型 API Key。根据本地数据，今天没有明确待完成事项。建议检查是否有遗漏任务，并保留一段时间处理临时事项。";
   }
 
-  const client = new OpenAI({
-    apiKey: params.apiKey,
-    baseURL: "https://api.deepseek.com"
-  });
+  const client = createAiClient(params);
 
   const response = await client.chat.completions.create({
     model: params.model,
@@ -114,18 +119,17 @@ export async function summarizeRecentContext(params: {
   return response.choices[0]?.message?.content?.trim() || "暂时没有足够内容可以总结。";
 }
 
-export async function testDeepSeekApi(params: {
+export async function testAiConnection(params: {
   apiKey?: string;
+  baseURL?: string;
   model: string;
+  providerName?: string;
 }): Promise<string> {
   if (!params.apiKey?.trim()) {
-    throw new Error("请先填写 DeepSeek API Key，或配置 DEEPSEEK_API_KEY 环境变量。");
+    throw new Error(`请先填写 ${params.providerName ?? "模型服务"} API Key，或配置对应环境变量。`);
   }
 
-  const client = new OpenAI({
-    apiKey: params.apiKey,
-    baseURL: "https://api.deepseek.com"
-  });
+  const client = createAiClient(params);
 
   const response = await client.chat.completions.create({
     model: params.model,
@@ -138,13 +142,15 @@ export async function testDeepSeekApi(params: {
   });
 
   const text = response.choices[0]?.message?.content?.trim();
-  if (!Array.isArray(response.choices)) throw new Error("DeepSeek 返回结构异常。");
+  if (!Array.isArray(response.choices)) throw new Error(`${params.providerName ?? "模型服务"} 返回结构异常。`);
   return text || "OK";
 }
 
 export async function processSelectedText(params: {
   apiKey?: string;
+  baseURL?: string;
   model: string;
+  providerName?: string;
   action: SelectionTextAction;
   text: string;
   targetLanguage?: string;
@@ -153,14 +159,11 @@ export async function processSelectedText(params: {
   if (!trimmed) return "";
   if (!params.apiKey) {
     return params.action === "translate"
-      ? `当前没有配置 DeepSeek API Key。\n\n${trimmed}`
-      : `当前没有配置 DeepSeek API Key。\n\n- 已选中文字共 ${trimmed.length} 个字符。\n- 请配置 API Key 后使用智能总结。`;
+      ? `当前没有配置模型 API Key。\n\n${trimmed}`
+      : `当前没有配置模型 API Key。\n\n- 已选中文字共 ${trimmed.length} 个字符。\n- 请配置 API Key 后使用智能总结。`;
   }
 
-  const client = new OpenAI({
-    apiKey: params.apiKey,
-    baseURL: "https://api.deepseek.com"
-  });
+  const client = createAiClient(params);
 
   const targetLanguage = normalizeTargetLanguage(params.targetLanguage);
   const systemPrompt = params.action === "translate"
@@ -176,6 +179,18 @@ export async function processSelectedText(params: {
   });
 
   return response.choices[0]?.message?.content?.trim() || "没有生成可展示的内容。";
+}
+
+function createAiClient(config: AiClientConfig) {
+  return new OpenAI({
+    apiKey: config.apiKey,
+    baseURL: normalizeBaseUrl(config.baseURL)
+  });
+}
+
+function normalizeBaseUrl(value?: string) {
+  const trimmed = value?.trim();
+  return trimmed || undefined;
 }
 
 function normalizeTargetLanguage(value?: string) {

@@ -37,6 +37,7 @@ const api = {
     retranslate: (id, targetLanguage) => ipcRenderer.invoke("selection:retranslate", id, targetLanguage),
     getResult: (id) => ipcRenderer.invoke("selection:getResult", id),
     getCapture: (id) => ipcRenderer.invoke("selection:getCapture", id),
+    openCapturePopover: (text, clientX, clientY) => ipcRenderer.invoke("selection:openCapturePopover", text, clientX, clientY),
     resizePopover: (expanded) => ipcRenderer.invoke("selection:resizePopover", expanded),
     createTodoFromCapture: (id) => ipcRenderer.invoke("selection:createTodoFromCapture", id)
   },
@@ -51,7 +52,8 @@ const api = {
     },
     endWindowDrag: () => ipcRenderer.invoke("app:endWindowDrag"),
     setPetWindowExpanded: (expanded) => ipcRenderer.invoke("app:setPetWindowExpanded", expanded),
-    openWorkspaceWindow: (todoId) => ipcRenderer.invoke("app:openWorkspaceWindow", todoId)
+    openWorkspaceWindow: (todoId) => ipcRenderer.invoke("app:openWorkspaceWindow", todoId),
+    checkForUpdates: () => ipcRenderer.invoke("app:checkForUpdates")
   },
   events: {
     onReminderFired: (callback) => {

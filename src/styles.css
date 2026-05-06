@@ -779,7 +779,8 @@ input {
 }
 
 .composer input,
-.settings input {
+.settings input,
+.settings select {
   min-width: 0;
   flex: 1;
   border: 1px solid rgba(39, 70, 65, .18);
@@ -789,7 +790,8 @@ input {
   background: #fff;
 }
 
-.workspace-shell input:focus {
+.workspace-shell input:focus,
+.workspace-shell select:focus {
   border-color: var(--workspace-accent);
   box-shadow: 0 0 0 3px var(--workspace-shadow);
 }
@@ -946,6 +948,7 @@ input {
 .workspace-shell .ghost-button,
 .workspace-shell .appearance-button,
 .workspace-shell .todo-action,
+.workspace-shell .check-update-button,
 .workspace-shell .test-api-button,
 .workspace-shell .test-reminder-button,
 .workspace-shell .workspace-composer button {
@@ -955,6 +958,7 @@ input {
 .workspace-shell .ghost-button:hover,
 .workspace-shell .appearance-button:hover,
 .workspace-shell .todo-action:hover,
+.workspace-shell .check-update-button:hover,
 .workspace-shell .test-api-button:hover,
 .workspace-shell .test-reminder-button:hover,
 .workspace-shell .workspace-composer button:hover {
@@ -1016,6 +1020,7 @@ input {
   color: #4c5d5b;
 }
 
+.ai-setting,
 .theme-setting {
   display: grid;
   gap: 8px;
@@ -1161,6 +1166,7 @@ input {
 }
 
 .test-reminder-button,
+.check-update-button,
 .test-api-button,
 .clear-chat-button {
   display: inline-flex;
@@ -1175,7 +1181,8 @@ input {
   cursor: pointer;
 }
 
-.test-api-button:disabled {
+.test-api-button:disabled,
+.check-update-button:disabled {
   cursor: default;
   opacity: .62;
 }

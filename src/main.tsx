@@ -18,12 +18,6 @@ type PetVisualState = PetMood | "confused" | "dragging" | "urgent" | "rest" | "s
 type LocalPetMood = PetMood | "confused";
 type SelectionAction = "summarize" | "translate" | "todo";
 
-interface SelectionPopoverState {
-  text: string;
-  x: number;
-  y: number;
-}
-
 const petStateImages: Record<PetVisualState, string> = {
   idle: idleImage,
   talking: talkingImage,
@@ -38,6 +32,11 @@ const petStateImages: Record<PetVisualState, string> = {
 };
 
 const workspaceThemePresets = ["#5aa982", "#4d8fc8", "#d59a3a", "#c56c86", "#8a75c9", "#5c8f7a"];
+const aiProviderPresets: Record<AppSettings["aiProvider"], { label: string; baseUrl: string; model: string }> = {
+  deepseek: { label: "DeepSeek", baseUrl: "https://api.deepseek.com", model: "deepseek-v4-flash" },
+  openai: { label: "OpenAI", baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini" },
+  custom: { label: "自定义提供商", baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini" }
+};
 
 function App() {
   const searchParams = new URLSearchParams(window.location.search);
@@ -59,8 +58,6 @@ function App() {
   const [pendingPlan, setPendingPlan] = React.useState<PlanProposal | null>(null);
   const [planBusy, setPlanBusy] = React.useState(false);
   const [thinkingPlaceholder, setThinkingPlaceholder] = React.useState<ConversationMessage | null>(null);
-  const [selectionPopover, setSelectionPopover] = React.useState<SelectionPopoverState | null>(null);
-  const [selectionBusy, setSelectionBusy] = React.useState(false);
   const [activeReminder, setActiveReminder] = React.useState<ReminderItem | null>(null);
   const [focusedTodoId, setFocusedTodoId] = React.useState<string | null>(null);
   const [now, setNow] = React.useState(() => Date.now());
@@ -185,7 +182,6 @@ function App() {
     if (!text || busy) return;
     setBusy(true);
     markInteraction();
-    setSelectionPopover(null);
     const userMessage: ConversationMessage = {
       id: crypto.randomUUID(),
       role: "user",
@@ -312,53 +308,16 @@ function App() {
   }
 
   function updateSelectionPopover(mousePosition?: { x: number; y: number }) {
-    if (!isWorkspaceWindow) return;
+    if (!api || !isWorkspaceWindow) return;
     window.setTimeout(() => {
-      const selection = window.getSelection();
-      const text = selection?.toString().trim() ?? "";
-      if (!selection || text.length < 2 || selection.rangeCount === 0) {
-        setSelectionPopover(null);
-        return;
-      }
-      const range = selection.getRangeAt(0);
-      const rect = range.getBoundingClientRect();
-      if (!rect.width && !rect.height) {
-        setSelectionPopover(null);
-        return;
-      }
-      const fallbackX = rect.left + rect.width / 2;
-      const fallbackY = rect.bottom;
+      const capture = getWorkspaceSelectedText();
+      if (!capture) return;
+      const fallbackX = capture.rect ? capture.rect.left + capture.rect.width / 2 : window.innerWidth / 2;
+      const fallbackY = capture.rect ? capture.rect.bottom : window.innerHeight / 2;
       const anchorX = mousePosition?.x ?? fallbackX;
       const anchorY = mousePosition?.y ?? fallbackY;
-      setSelectionPopover({
-        text: text.slice(0, 4000),
-        x: Math.min(window.innerWidth - 42, Math.max(8, anchorX + 8)),
-        y: Math.min(window.innerHeight - 42, Math.max(8, anchorY + 8))
-      });
+      void api.selection.openCapturePopover(capture.text, anchorX, anchorY);
     }, 0);
-  }
-
-  async function runSelectionAction(action: SelectionAction, selectedText: string) {
-    if ((action === "summarize" || action === "translate") && api) {
-      markInteraction();
-      setSelectionPopover(null);
-      setSelectionBusy(true);
-      try {
-        await api.selection.process(action, selectedText);
-      } catch (error) {
-        setBubble(error instanceof Error ? error.message : "处理选中文字失败。");
-      } finally {
-        setSelectionBusy(false);
-      }
-      return;
-    }
-    const prompts: Record<SelectionAction, string> = {
-      summarize: `请用简洁中文总结下面这段选中文字，保留关键事实和行动点：\n\n${selectedText}`,
-      translate: `请把下面这段选中文字翻译成自然中文；如果原文已经是中文，请改写得更清晰：\n\n${selectedText}`,
-      todo: `请根据下面这段选中文字生成待办。如果它是复杂目标，请拆成可确认的计划步骤；如果只是单个事项，请生成一条待办：\n\n${selectedText}`
-    };
-    const placeholderText = action === "todo" ? "我在从选中文字里整理待办..." : "我在处理选中的文字...";
-    await sendText(prompts[action], placeholderText);
   }
 
   async function updateSettings(patch: Partial<AppSettings>) {
@@ -481,8 +440,6 @@ function App() {
         pendingPlan={pendingPlan}
         planBusy={planBusy}
         thinkingPlaceholder={thinkingPlaceholder}
-        selectionPopover={selectionPopover}
-        selectionBusy={selectionBusy}
         input={input}
         busy={busy}
         onInputChange={setInput}
@@ -494,8 +451,6 @@ function App() {
         onAcceptPlan={acceptPendingPlan}
         onDismissPlan={dismissPendingPlan}
         onSelectionUpdate={updateSelectionPopover}
-        onSelectionAction={(action, text) => void runSelectionAction(action, text)}
-        onSelectionClose={() => setSelectionPopover(null)}
         onUpdateSettings={updateSettings}
         onClearMessages={clearMessages}
         onSelectPetAppearance={selectPetAppearance}
@@ -581,6 +536,26 @@ function App() {
   );
 }
 
+function getWorkspaceSelectedText(): { text: string; rect: DOMRect | null } | null {
+  const activeElement = document.activeElement;
+  if (activeElement instanceof HTMLInputElement || activeElement instanceof HTMLTextAreaElement) {
+    const start = activeElement.selectionStart ?? 0;
+    const end = activeElement.selectionEnd ?? 0;
+    const text = activeElement.value.slice(Math.min(start, end), Math.max(start, end)).trim();
+    if (text.length >= 2) {
+      return { text: text.slice(0, 8000), rect: activeElement.getBoundingClientRect() };
+    }
+  }
+
+  const selection = window.getSelection();
+  const text = selection?.toString().trim() ?? "";
+  if (!selection || text.length < 2 || selection.rangeCount === 0) return null;
+  const range = selection.getRangeAt(0);
+  const rect = range.getBoundingClientRect();
+  if (!rect.width && !rect.height) return null;
+  return { text: text.slice(0, 8000), rect };
+}
+
 function WorkspaceWindow({
   api,
   messages,
@@ -589,8 +564,6 @@ function WorkspaceWindow({
   pendingPlan,
   planBusy,
   thinkingPlaceholder,
-  selectionPopover,
-  selectionBusy,
   input,
   busy,
   onInputChange,
@@ -602,8 +575,6 @@ function WorkspaceWindow({
   onAcceptPlan,
   onDismissPlan,
   onSelectionUpdate,
-  onSelectionAction,
-  onSelectionClose,
   onUpdateSettings,
   onClearMessages,
   onSelectPetAppearance,
@@ -618,8 +589,6 @@ function WorkspaceWindow({
   pendingPlan: PlanProposal | null;
   planBusy: boolean;
   thinkingPlaceholder: ConversationMessage | null;
-  selectionPopover: SelectionPopoverState | null;
-  selectionBusy: boolean;
   input: string;
   busy: boolean;
   onInputChange(value: string): void;
@@ -631,9 +600,7 @@ function WorkspaceWindow({
   onAcceptPlan(): void;
   onDismissPlan(): void;
   onSelectionUpdate(mousePosition?: { x: number; y: number }): void;
-  onSelectionAction(action: SelectionAction, text: string): void;
-  onSelectionClose(): void;
-  onUpdateSettings(patch: Partial<AppSettings>): void;
+  onUpdateSettings(patch: Partial<AppSettings>): void | Promise<void>;
   onClearMessages(): void;
   onSelectPetAppearance(): void;
   onResetPetAppearance(): void;
@@ -676,20 +643,9 @@ function WorkspaceWindow({
     <main
       className="workspace-shell"
       style={themeStyle}
-      onMouseUp={(event) => onSelectionUpdate({ x: event.clientX, y: event.clientY })}
-      onKeyUp={() => onSelectionUpdate()}
+      onMouseUpCapture={(event) => onSelectionUpdate({ x: event.clientX, y: event.clientY })}
+      onKeyUpCapture={() => onSelectionUpdate()}
     >
-      {selectionPopover && (
-        <SelectionPopover
-          selection={selectionPopover}
-          busy={busy || selectionBusy}
-          onAction={onSelectionAction}
-          onClose={() => {
-            window.getSelection()?.removeAllRanges();
-            onSelectionClose();
-          }}
-        />
-      )}
       <aside className="workspace-sidebar">
         <div className="workspace-brand">
           <strong>Linnea</strong>
@@ -871,44 +827,6 @@ function PlanProposalCard({
         </button>
         <button type="button" onClick={onDismiss} disabled={busy}>
           <X size={14} /> 暂不写入
-        </button>
-      </div>
-    </section>
-  );
-}
-
-function SelectionPopover({
-  selection,
-  busy,
-  onAction,
-  onClose
-}: {
-  selection: SelectionPopoverState;
-  busy: boolean;
-  onAction(action: SelectionAction, text: string): void;
-  onClose(): void;
-}) {
-  return (
-    <section
-      className="selection-popover"
-      style={{ left: selection.x, top: selection.y }}
-      onMouseDown={(event) => event.preventDefault()}
-    >
-      <span className="selection-popover-dot" aria-hidden="true">
-        <Sparkles size={16} />
-      </span>
-      <div className="selection-toolbar" aria-label="选中文字操作">
-        <button type="button" title="总结" disabled={busy} onClick={() => onAction("summarize", selection.text)}>
-          <FileText size={14} /> 总结
-        </button>
-        <button type="button" title="翻译" disabled={busy} onClick={() => onAction("translate", selection.text)}>
-          <Languages size={14} /> 翻译
-        </button>
-        <button type="button" title="生成待办" disabled={busy} onClick={() => onAction("todo", selection.text)}>
-          <ListTodo size={14} /> 待办
-        </button>
-        <button type="button" title="关闭" disabled={busy} aria-label="关闭选中文本操作" onClick={onClose}>
-          <X size={14} />
         </button>
       </div>
     </section>
@@ -1669,21 +1587,35 @@ function SettingsPanel({
   api
 }: {
   settings: AppSettings;
-  onChange(patch: Partial<AppSettings>): void;
+  onChange(patch: Partial<AppSettings>): void | Promise<void>;
   onClearMessages(): void;
   onSelectPetAppearance(): void;
   onResetPetAppearance(): void;
   onTestReminder(): Promise<void>;
   api?: DesktopPetApi;
 }) {
-  const [apiKey, setApiKey] = React.useState(settings.openAiApiKey ?? "");
+  const [apiKey, setApiKey] = React.useState(settings.aiApiKey ?? settings.openAiApiKey ?? "");
+  const [aiProviderName, setAiProviderName] = React.useState(settings.aiProviderName ?? aiProviderPresets[settings.aiProvider].label);
+  const [aiBaseUrl, setAiBaseUrl] = React.useState(settings.aiBaseUrl ?? aiProviderPresets[settings.aiProvider].baseUrl);
+  const [aiModel, setAiModel] = React.useState(settings.aiModel ?? settings.openAiModel);
   const [themeColor, setThemeColor] = React.useState(settings.workspaceThemeColor);
   const [apiTestBusy, setApiTestBusy] = React.useState(false);
   const [apiTestResult, setApiTestResult] = React.useState<{ ok: boolean; message: string } | null>(null);
+  const [updateCheckBusy, setUpdateCheckBusy] = React.useState(false);
 
   React.useEffect(() => {
     setThemeColor(settings.workspaceThemeColor);
   }, [settings.workspaceThemeColor]);
+
+  React.useEffect(() => {
+    setApiKey(settings.aiApiKey ?? settings.openAiApiKey ?? "");
+  }, [settings.aiApiKey, settings.openAiApiKey]);
+
+  React.useEffect(() => {
+    setAiProviderName(settings.aiProviderName ?? aiProviderPresets[settings.aiProvider].label);
+    setAiBaseUrl(settings.aiBaseUrl ?? aiProviderPresets[settings.aiProvider].baseUrl);
+    setAiModel(settings.aiModel ?? settings.openAiModel);
+  }, [settings.aiBaseUrl, settings.aiModel, settings.aiProvider, settings.aiProviderName, settings.openAiModel]);
 
   function updateThemeColor(value: string) {
     setThemeColor(value);
@@ -1692,8 +1624,36 @@ function SettingsPanel({
     }
   }
 
+  function changeAiProvider(provider: AppSettings["aiProvider"]) {
+    const preset = aiProviderPresets[provider];
+    setAiProviderName(preset.label);
+    setAiBaseUrl(preset.baseUrl);
+    setAiModel(preset.model);
+    setApiTestResult(null);
+    onChange({
+      aiProvider: provider,
+      aiProviderName: preset.label,
+      aiBaseUrl: preset.baseUrl,
+      aiModel: preset.model,
+      openAiModel: preset.model
+    });
+  }
+
+  function persistAiConfig(patch: Partial<AppSettings>) {
+    setApiTestResult(null);
+    return Promise.resolve(onChange(patch));
+  }
+
   async function testApi() {
     if (!api || apiTestBusy) return;
+    await persistAiConfig({
+      aiApiKey: apiKey || undefined,
+      openAiApiKey: apiKey || undefined,
+      aiProviderName: aiProviderName || aiProviderPresets[settings.aiProvider].label,
+      aiBaseUrl: aiBaseUrl || undefined,
+      aiModel: aiModel || aiProviderPresets[settings.aiProvider].model,
+      openAiModel: aiModel || aiProviderPresets[settings.aiProvider].model
+    });
     setApiTestBusy(true);
     setApiTestResult(null);
     try {
@@ -1709,12 +1669,72 @@ function SettingsPanel({
     }
   }
 
+  async function checkForUpdates() {
+    if (!api || updateCheckBusy) return;
+    setUpdateCheckBusy(true);
+    try {
+      await api.app.checkForUpdates();
+    } finally {
+      setUpdateCheckBusy(false);
+    }
+  }
+
   return (
     <section className="settings">
-      <label>
-        <KeyRound size={14} /> DeepSeek API Key
-        <input value={apiKey} onChange={(event) => setApiKey(event.target.value)} onBlur={() => onChange({ openAiApiKey: apiKey || undefined })} placeholder="也可使用系统环境变量 DEEPSEEK_API_KEY" />
-      </label>
+      <section className="ai-setting" aria-label="模型服务设置">
+        <div className="setting-label">
+          <Sparkles size={14} /> 模型服务
+        </div>
+        <label>
+          提供商
+          <select
+            value={settings.aiProvider}
+            onChange={(event) => changeAiProvider(event.target.value as AppSettings["aiProvider"])}
+          >
+            <option value="deepseek">DeepSeek</option>
+            <option value="openai">OpenAI</option>
+            <option value="custom">自定义提供商</option>
+          </select>
+        </label>
+        {settings.aiProvider === "custom" && (
+          <label>
+            提供商名称
+            <input
+              value={aiProviderName}
+              onChange={(event) => setAiProviderName(event.target.value)}
+              onBlur={() => persistAiConfig({ aiProviderName: aiProviderName || "自定义提供商" })}
+              placeholder="例如 OpenRouter / SiliconFlow"
+            />
+          </label>
+        )}
+        <label>
+          Base URL
+          <input
+            value={aiBaseUrl}
+            onChange={(event) => setAiBaseUrl(event.target.value)}
+            onBlur={() => persistAiConfig({ aiBaseUrl: aiBaseUrl || undefined })}
+            placeholder="https://api.openai.com/v1"
+          />
+        </label>
+        <label>
+          模型
+          <input
+            value={aiModel}
+            onChange={(event) => setAiModel(event.target.value)}
+            onBlur={() => persistAiConfig({ aiModel: aiModel || aiProviderPresets[settings.aiProvider].model, openAiModel: aiModel || aiProviderPresets[settings.aiProvider].model })}
+            placeholder={aiProviderPresets[settings.aiProvider].model}
+          />
+        </label>
+        <label>
+          API Key
+          <input
+            value={apiKey}
+            onChange={(event) => setApiKey(event.target.value)}
+            onBlur={() => persistAiConfig({ aiApiKey: apiKey || undefined, openAiApiKey: apiKey || undefined })}
+            placeholder="也可使用对应环境变量"
+          />
+        </label>
+      </section>
       <button className="test-api-button" onClick={() => void testApi()} disabled={apiTestBusy}>
         <Sparkles size={15} /> {apiTestBusy ? "测试中..." : "测试 API"}
       </button>
@@ -1770,6 +1790,9 @@ function SettingsPanel({
       </button>
       <button className="test-reminder-button" onClick={() => void onTestReminder()}>
         <Bell size={15} /> 测试 Windows 提醒
+      </button>
+      <button className="check-update-button" onClick={() => void checkForUpdates()} disabled={updateCheckBusy}>
+        <RotateCcw size={15} /> {updateCheckBusy ? "检查中..." : "检查更新"}
       </button>
     </section>
   );

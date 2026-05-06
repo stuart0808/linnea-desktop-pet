@@ -2,18 +2,21 @@ import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, Noti
 import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { readdir } from "node:fs/promises";
+import { get as httpsGet } from "node:https";
 import { fileURLToPath } from "node:url";
 import { pathToFileURL } from "node:url";
 import { basename, dirname, extname, join } from "node:path";
 import { uIOhook, UiohookKey, type UiohookMouseEvent } from "uiohook-napi";
 import type { AppSettings, ChatResult, PetAppearance, ReminderItem, SelectionCapture, SelectionTextAction, SelectionTextResult, TodoCandidate, TodoItem } from "../../shared/types.js";
-import { askPetAssistant, processSelectedText, summarizeRecentContext, testDeepSeekApi } from "./openaiClient.js";
+import { askPetAssistant, processSelectedText, summarizeRecentContext, testAiConnection } from "./openaiClient.js";
 import { JsonStore } from "./storage.js";
 import type { OpenDialogOptions } from "electron";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const store = new JsonStore();
 const appUserModelId = "com.local.linnea";
+const githubRepoOwner = "stuart0808";
+const githubRepoName = "linnea-desktop-pet";
 app.setName("Linnea");
 
 if (process.platform === "win32") {
@@ -41,6 +44,16 @@ let globalMouseDown: { x: number; y: number; time: number; insideAppWindow: bool
 let globalSelectionCaptureInFlight = false;
 let selectionPopoverAnchor: { x: number; y: number } | null = null;
 type ClipboardSnapshot = ReturnType<typeof readClipboardSnapshot>;
+interface GitHubReleaseAsset {
+  name?: string;
+  browser_download_url?: string;
+}
+interface GitHubRelease {
+  tag_name?: string;
+  name?: string;
+  html_url?: string;
+  assets?: GitHubReleaseAsset[];
+}
 const petStateNames = ["Idle", "Talking", "Happy", "Thinking", "Reminder", "Confused", "Dragging", "Urgent", "Rest", "Sleepy"] as const;
 const supportedPetImageExtensions = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif", ".avif"]);
 
@@ -280,10 +293,9 @@ async function openSelectionResultWindow(result: SelectionTextResult) {
 async function processSelectionResultInBackground(result: SelectionTextResult, text: string, targetLanguage?: string) {
   try {
     const settings = await store.getSettings();
-    const apiKey = settings.openAiApiKey || process.env.DEEPSEEK_API_KEY || process.env.OPENAI_API_KEY;
+    const ai = resolveAiConfig(settings);
     const markdown = await processSelectedText({
-      apiKey,
-      model: settings.openAiModel,
+      ...ai,
       action: result.action,
       text,
       targetLanguage
@@ -411,6 +423,142 @@ function createTray() {
   );
 }
 
+async function checkForUpdates(manual = false) {
+  try {
+    const settings = await store.getSettings();
+    const release = await fetchLatestGitHubRelease();
+    const latestVersion = normalizeVersion(release.tag_name ?? release.name);
+    const currentVersion = normalizeVersion(app.getVersion());
+    if (!latestVersion || !currentVersion) {
+      if (manual) await showUpdateInfo("无法识别版本信息", "没有从 GitHub release 中读取到可比较的版本号。");
+      return;
+    }
+    if (compareVersions(latestVersion, currentVersion) <= 0) {
+      if (manual) await showUpdateInfo("已是最新版本", `当前版本 ${currentVersion} 已是最新版本。`);
+      return;
+    }
+    if (!manual && settings.skippedUpdateVersion === latestVersion) return;
+
+    const installerAsset = findWindowsInstallerAsset(release.assets);
+    const downloadUrl = installerAsset?.browser_download_url ?? release.html_url;
+    if (!downloadUrl) {
+      if (manual) await showUpdateInfo("发现新版本", `Linnea ${latestVersion} 已发布，但没有找到可用下载链接。`);
+      return;
+    }
+
+    const messageOptions: Electron.MessageBoxOptions = {
+      type: "info",
+      title: "发现新版本",
+      message: `Linnea ${latestVersion} 已发布`,
+      detail: `当前版本：${currentVersion}\n最新版本：${latestVersion}\n\n是否下载最新安装包？`,
+      buttons: ["更新", "跳过当前版本", "稍后"],
+      defaultId: 0,
+      cancelId: 2,
+      noLink: true
+    };
+    const response = mainWindow
+      ? await dialog.showMessageBox(mainWindow, messageOptions)
+      : await dialog.showMessageBox(messageOptions);
+
+    if (response.response === 0) {
+      await shell.openExternal(downloadUrl);
+    } else if (response.response === 1) {
+      await store.updateSettings({ skippedUpdateVersion: latestVersion });
+    }
+  } catch (error) {
+    console.error("Failed to check for updates", error);
+    if (manual) {
+      await showUpdateInfo("检查更新失败", error instanceof Error ? error.message : "请稍后再试。");
+    }
+  }
+}
+
+function showUpdateInfo(message: string, detail: string) {
+  const messageOptions: Electron.MessageBoxOptions = {
+    type: "info",
+    title: "检查更新",
+    message,
+    detail,
+    buttons: ["确定"],
+    defaultId: 0,
+    noLink: true
+  };
+  return mainWindow
+    ? dialog.showMessageBox(mainWindow, messageOptions)
+    : dialog.showMessageBox(messageOptions);
+}
+
+function fetchLatestGitHubRelease(): Promise<GitHubRelease> {
+  const url = `https://api.github.com/repos/${githubRepoOwner}/${githubRepoName}/releases/latest`;
+  return new Promise((resolve, reject) => {
+    const request = httpsGet(url, {
+      headers: {
+        Accept: "application/vnd.github+json",
+        "User-Agent": `${githubRepoName}/${app.getVersion()}`
+      }
+    }, (response) => {
+      if (response.statusCode && response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+        response.resume();
+        httpsGet(response.headers.location, (redirectResponse) => collectJsonResponse(redirectResponse, resolve, reject)).on("error", reject);
+        return;
+      }
+      collectJsonResponse(response, resolve, reject);
+    });
+    request.setTimeout(9000, () => {
+      request.destroy(new Error("检查更新超时"));
+    });
+    request.on("error", reject);
+  });
+}
+
+function collectJsonResponse(
+  response: import("node:http").IncomingMessage,
+  resolve: (value: GitHubRelease) => void,
+  reject: (reason?: unknown) => void
+) {
+  let body = "";
+  response.setEncoding("utf8");
+  response.on("data", (chunk) => {
+    body += chunk;
+  });
+  response.on("end", () => {
+    if (!response.statusCode || response.statusCode < 200 || response.statusCode >= 300) {
+      reject(new Error(`GitHub releases 请求失败：${response.statusCode ?? "unknown"}`));
+      return;
+    }
+    try {
+      resolve(JSON.parse(body) as GitHubRelease);
+    } catch (error) {
+      reject(error);
+    }
+  });
+  response.on("error", reject);
+}
+
+function findWindowsInstallerAsset(assets: GitHubReleaseAsset[] | undefined) {
+  if (!assets?.length) return undefined;
+  return assets.find((asset) => asset.name?.toLowerCase().endsWith(".exe") && /setup/i.test(asset.name)) ??
+    assets.find((asset) => asset.name?.toLowerCase().endsWith(".exe"));
+}
+
+function normalizeVersion(value: string | undefined) {
+  const match = value?.trim().match(/^v?(\d+(?:\.\d+){0,2})/i);
+  if (!match) return undefined;
+  const parts = match[1].split(".").map((part) => Number.parseInt(part, 10));
+  while (parts.length < 3) parts.push(0);
+  return parts.slice(0, 3).join(".");
+}
+
+function compareVersions(left: string, right: string) {
+  const leftParts = left.split(".").map((part) => Number.parseInt(part, 10));
+  const rightParts = right.split(".").map((part) => Number.parseInt(part, 10));
+  for (let index = 0; index < 3; index += 1) {
+    const difference = (leftParts[index] || 0) - (rightParts[index] || 0);
+    if (difference !== 0) return difference;
+  }
+  return 0;
+}
+
 function registerGlobalSelectionHook() {
   if (process.platform !== "win32" || globalSelectionHookStarted) return;
   try {
@@ -460,7 +608,7 @@ async function syncGlobalSelectionHook() {
 }
 
 function isPointInsideAppWindow(x: number, y: number) {
-  const ignoredWindows = [mainWindow, workspaceWindow, selectionPopoverWindow, ...selectionResultWindows].filter(
+  const ignoredWindows = [mainWindow, selectionPopoverWindow, ...selectionResultWindows].filter(
     (window): window is BrowserWindow => Boolean(window)
   );
   return ignoredWindows.some((window) => {
@@ -658,6 +806,28 @@ function getLocalTimeContext(now = new Date()) {
   };
 }
 
+function resolveAiConfig(settings: AppSettings, apiKeyOverride?: string) {
+  const providerName = settings.aiProviderName || getAiProviderLabel(settings.aiProvider);
+  return {
+    apiKey: apiKeyOverride?.trim() || settings.aiApiKey || getAiProviderEnvKey(settings.aiProvider),
+    baseURL: settings.aiBaseUrl,
+    model: settings.aiModel || settings.openAiModel,
+    providerName
+  };
+}
+
+function getAiProviderEnvKey(provider: AppSettings["aiProvider"]) {
+  if (provider === "deepseek") return process.env.DEEPSEEK_API_KEY || process.env.OPENAI_API_KEY;
+  if (provider === "openai") return process.env.OPENAI_API_KEY;
+  return process.env.OPENAI_API_KEY || process.env.DEEPSEEK_API_KEY;
+}
+
+function getAiProviderLabel(provider: AppSettings["aiProvider"]) {
+  if (provider === "openai") return "OpenAI";
+  if (provider === "custom") return "自定义提供商";
+  return "DeepSeek";
+}
+
 function createTodo(candidate: {
   title: string;
   notes?: string | null;
@@ -776,6 +946,7 @@ function registerIpc() {
     setPetWindowExpanded(expanded);
   });
   ipcMain.handle("app:openWorkspaceWindow", (_event, todoId?: string) => openWorkspaceWindow(todoId));
+  ipcMain.handle("app:checkForUpdates", () => checkForUpdates(true));
 
   ipcMain.handle("chat:listMessages", () => store.listMessages());
   ipcMain.handle("chat:clearMessages", async (_event) => {
@@ -784,10 +955,10 @@ function registerIpc() {
   });
   ipcMain.handle("chat:testApi", async (_event, apiKeyOverride?: string): Promise<{ ok: boolean; message: string }> => {
     const settings = await store.getSettings();
-    const apiKey = apiKeyOverride?.trim() || settings.openAiApiKey || process.env.DEEPSEEK_API_KEY || process.env.OPENAI_API_KEY;
+    const ai = resolveAiConfig(settings, apiKeyOverride);
     try {
-      await testDeepSeekApi({ apiKey, model: settings.openAiModel });
-      return { ok: true, message: `API 连接正常，模型 ${settings.openAiModel} 可用。` };
+      await testAiConnection(ai);
+      return { ok: true, message: `${ai.providerName} API 连接正常，模型 ${ai.model} 可用。` };
     } catch (error) {
       return {
         ok: false,
@@ -808,11 +979,10 @@ function registerIpc() {
     await store.addMessage(userMessage);
 
     const settings = await store.getSettings();
-    const apiKey = settings.openAiApiKey || process.env.DEEPSEEK_API_KEY || process.env.OPENAI_API_KEY;
+    const ai = resolveAiConfig(settings);
     const timeContext = getLocalTimeContext();
     const modelResult = await askPetAssistant({
-      apiKey,
-      model: settings.openAiModel,
+      ...ai,
       text: trimmed,
       ...timeContext
     });
@@ -911,11 +1081,10 @@ function registerIpc() {
 
   ipcMain.handle("summary:generate", async () => {
     const settings = await store.getSettings();
-    const apiKey = settings.openAiApiKey || process.env.DEEPSEEK_API_KEY || process.env.OPENAI_API_KEY;
+    const ai = resolveAiConfig(settings);
     const timeContext = getLocalTimeContext();
     return summarizeRecentContext({
-      apiKey,
-      model: settings.openAiModel,
+      ...ai,
       messages: await store.listMessages(),
       todos: await store.listTodos(),
       ...timeContext
@@ -959,6 +1128,22 @@ function registerIpc() {
   });
   ipcMain.handle("selection:getResult", (_event, id: string) => selectionResults.get(id) ?? null);
   ipcMain.handle("selection:getCapture", (_event, id: string) => selectionCaptures.get(id) ?? null);
+  ipcMain.handle("selection:openCapturePopover", async (_event, text: string, clientX: number, clientY: number) => {
+    const trimmed = typeof text === "string" ? text.trim() : "";
+    if (trimmed.length < 2) return;
+    const senderWindow = BrowserWindow.fromWebContents(_event.sender);
+    if (!senderWindow || senderWindow.isDestroyed()) return;
+    const contentBounds = senderWindow.getContentBounds();
+    const anchorX = Number.isFinite(clientX) ? contentBounds.x + clientX : contentBounds.x + contentBounds.width / 2;
+    const anchorY = Number.isFinite(clientY) ? contentBounds.y + clientY : contentBounds.y + contentBounds.height / 2;
+    const capture: SelectionCapture = {
+      id: randomUUID(),
+      text: trimmed.slice(0, 8000),
+      createdAt: new Date().toISOString()
+    };
+    selectionCaptures.set(capture.id, capture);
+    await openSelectionPopoverWindow(capture, anchorX, anchorY);
+  });
   ipcMain.handle("selection:resizePopover", (_event, expanded: boolean) => resizeSelectionPopoverWindow(expanded));
   ipcMain.handle("selection:createTodoFromCapture", async (_event, id: string) => {
     const capture = selectionCaptures.get(id);
@@ -981,6 +1166,9 @@ app.whenReady().then(async () => {
     tray = null;
   }
   await refreshReminderTimers();
+  setTimeout(() => {
+    void checkForUpdates();
+  }, 3000);
   if (process.env.DESKTOP_PET_TEST_REMINDER === "1") {
     setTimeout(() => {
       void showReminder({

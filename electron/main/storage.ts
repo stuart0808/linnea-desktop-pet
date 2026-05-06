@@ -12,6 +12,11 @@ interface PersistedState {
 }
 
 const defaultSettings: AppSettings = {
+  aiProvider: "deepseek",
+  aiProviderName: "DeepSeek",
+  aiBaseUrl: "https://api.deepseek.com",
+  aiModel: "deepseek-v4-flash",
+  aiApiKey: undefined,
   openAiApiKey: undefined,
   openAiModel: "deepseek-v4-flash",
   alwaysOnTop: true,
@@ -20,7 +25,8 @@ const defaultSettings: AppSettings = {
   launchAtLogin: false,
   keepChatHistory: true,
   selectionToolsEnabled: true,
-  workspaceThemeColor: "#5aa982"
+  workspaceThemeColor: "#5aa982",
+  skippedUpdateVersion: undefined
 };
 
 export class JsonStore {
@@ -169,16 +175,49 @@ export class JsonStore {
 }
 
 function normalizeSettings(settings: AppSettings): AppSettings {
-  const supportedDeepSeekModels = new Set(["deepseek-v4-flash", "deepseek-v4-pro"]);
+  const provider = settings.aiProvider === "openai" || settings.aiProvider === "custom" ? settings.aiProvider : "deepseek";
+  const preset = getProviderPreset(provider);
+  const legacyModel = settings.openAiModel || "deepseek-v4-flash";
+  const aiModel = normalizeNonEmptyString(settings.aiModel) ?? legacyModel;
+  const aiApiKey = normalizeOptionalString(settings.aiApiKey ?? settings.openAiApiKey);
+  const aiBaseUrl = normalizeOptionalString(settings.aiBaseUrl) ?? preset.baseUrl;
   return {
     ...settings,
-    openAiModel: supportedDeepSeekModels.has(settings.openAiModel)
-      ? settings.openAiModel
-      : "deepseek-v4-flash",
+    aiProvider: provider,
+    aiProviderName: provider === "custom"
+      ? normalizeNonEmptyString(settings.aiProviderName) ?? "自定义提供商"
+      : preset.name,
+    aiBaseUrl,
+    aiModel,
+    aiApiKey,
+    openAiApiKey: aiApiKey,
+    openAiModel: aiModel,
     selectionToolsEnabled: settings.selectionToolsEnabled !== false,
     workspaceThemeColor: normalizeThemeColor(settings.workspaceThemeColor),
+    skippedUpdateVersion: normalizeOptionalString(settings.skippedUpdateVersion),
     petAppearance: settings.petAppearance?.directory ? settings.petAppearance : undefined
   };
+}
+
+function getProviderPreset(provider: AppSettings["aiProvider"]) {
+  switch (provider) {
+    case "openai":
+      return { name: "OpenAI", baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini" };
+    case "custom":
+      return { name: "自定义提供商", baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini" };
+    case "deepseek":
+    default:
+      return { name: "DeepSeek", baseUrl: "https://api.deepseek.com", model: "deepseek-v4-flash" };
+  }
+}
+
+function normalizeNonEmptyString(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+function normalizeOptionalString(value: string | undefined): string | undefined {
+  return normalizeNonEmptyString(value);
 }
 
 function normalizeThemeColor(value: string | undefined): string {

@@ -33,6 +33,11 @@ export interface ConversationMessage {
 }
 
 export interface AppSettings {
+  aiProvider: "deepseek" | "openai" | "custom";
+  aiProviderName?: string;
+  aiBaseUrl?: string;
+  aiModel: string;
+  aiApiKey?: string;
   openAiApiKey?: string;
   openAiModel: string;
   alwaysOnTop: boolean;
@@ -42,6 +47,7 @@ export interface AppSettings {
   keepChatHistory: boolean;
   selectionToolsEnabled: boolean;
   workspaceThemeColor: string;
+  skippedUpdateVersion?: string;
   petAppearance?: PetAppearance;
 }
 
@@ -148,6 +154,7 @@ export interface DesktopPetApi {
     retranslate(id: string, targetLanguage: string): Promise<SelectionTextResult>;
     getResult(id: string): Promise<SelectionTextResult | null>;
     getCapture(id: string): Promise<SelectionCapture | null>;
+    openCapturePopover(text: string, clientX: number, clientY: number): Promise<void>;
     resizePopover(expanded: boolean): Promise<void>;
     createTodoFromCapture(id: string): Promise<void>;
   };
@@ -160,6 +167,7 @@ export interface DesktopPetApi {
     endWindowDrag(): Promise<void>;
     setPetWindowExpanded(expanded: boolean): Promise<void>;
     openWorkspaceWindow(todoId?: string): Promise<void>;
+    checkForUpdates(): Promise<void>;
   };
   events: {
     onReminderFired(callback: (reminder: ReminderItem) => void): () => void;
