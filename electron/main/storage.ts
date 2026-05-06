@@ -1,0 +1,184 @@
+import { app } from "electron";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import type { AppSettings, ConversationMessage, ReminderItem, TodoItem } from "../../shared/types.js";
+
+interface PersistedState {
+  todos: TodoItem[];
+  reminders: ReminderItem[];
+  messages: ConversationMessage[];
+  settings: AppSettings;
+  lastAutoSavedTodoId?: string;
+}
+
+const defaultSettings: AppSettings = {
+  openAiApiKey: undefined,
+  openAiModel: "deepseek-v4-flash",
+  alwaysOnTop: true,
+  autoSaveTodos: true,
+  systemNotifications: true,
+  launchAtLogin: false,
+  keepChatHistory: true,
+  workspaceThemeColor: "#5aa982"
+};
+
+export class JsonStore {
+  private state: PersistedState | null = null;
+  private readonly filePath = join(app.getPath("userData"), "linnea-desktop-pet.json");
+
+  async load(): Promise<PersistedState> {
+    if (this.state) return this.state;
+
+    try {
+      const raw = await readFile(this.filePath, "utf8");
+      const parsed = JSON.parse(raw) as Partial<PersistedState>;
+      this.state = {
+        todos: parsed.todos ?? [],
+        reminders: parsed.reminders ?? [],
+        messages: parsed.messages ?? [],
+        settings: normalizeSettings({ ...defaultSettings, ...parsed.settings }),
+        lastAutoSavedTodoId: parsed.lastAutoSavedTodoId
+      };
+      await this.save();
+    } catch {
+      this.state = {
+        todos: [],
+        reminders: [],
+        messages: [],
+        settings: normalizeSettings(defaultSettings)
+      };
+      await this.save();
+    }
+
+    return this.state;
+  }
+
+  async snapshot(): Promise<PersistedState> {
+    const state = await this.load();
+    return structuredClone(state);
+  }
+
+  async save(): Promise<void> {
+    if (!this.state) return;
+    await mkdir(dirname(this.filePath), { recursive: true });
+    await writeFile(this.filePath, JSON.stringify(this.state, null, 2), "utf8");
+  }
+
+  async getSettings(): Promise<AppSettings> {
+    return (await this.load()).settings;
+  }
+
+  async updateSettings(patch: Partial<AppSettings>): Promise<AppSettings> {
+    const state = await this.load();
+    state.settings = normalizeSettings({ ...state.settings, ...patch });
+    await this.save();
+    return state.settings;
+  }
+
+  async addMessage(message: ConversationMessage): Promise<void> {
+    const state = await this.load();
+    if (state.settings.keepChatHistory) {
+      state.messages.push(message);
+      state.messages = state.messages.slice(-80);
+      await this.save();
+    }
+  }
+
+  async listMessages(): Promise<ConversationMessage[]> {
+    return (await this.load()).messages;
+  }
+
+  async clearMessages(): Promise<void> {
+    const state = await this.load();
+    state.messages = [];
+    await this.save();
+  }
+
+  async addTodo(todo: TodoItem, autoSaved = false): Promise<void> {
+    const state = await this.load();
+    state.todos.unshift(todo);
+    if (autoSaved) state.lastAutoSavedTodoId = todo.id;
+    await this.save();
+  }
+
+  async listTodos(): Promise<TodoItem[]> {
+    return (await this.load()).todos;
+  }
+
+  async updateTodo(id: string, patch: Partial<TodoItem>): Promise<TodoItem> {
+    const state = await this.load();
+    const index = state.todos.findIndex((todo) => todo.id === id);
+    if (index < 0) throw new Error("Todo not found");
+    state.todos[index] = { ...state.todos[index], ...patch };
+    await this.save();
+    return state.todos[index];
+  }
+
+  async deleteTodo(id: string): Promise<TodoItem> {
+    const state = await this.load();
+    const index = state.todos.findIndex((todo) => todo.id === id);
+    if (index < 0) throw new Error("Todo not found");
+    const [removed] = state.todos.splice(index, 1);
+    state.reminders = state.reminders.filter((reminder) => reminder.todoId !== id);
+    if (state.lastAutoSavedTodoId === id) state.lastAutoSavedTodoId = undefined;
+    await this.save();
+    return removed;
+  }
+
+  async undoLastAutoSave(): Promise<TodoItem | null> {
+    const state = await this.load();
+    if (!state.lastAutoSavedTodoId) return null;
+    const index = state.todos.findIndex((todo) => todo.id === state.lastAutoSavedTodoId);
+    if (index < 0) {
+      state.lastAutoSavedTodoId = undefined;
+      await this.save();
+      return null;
+    }
+    const [removed] = state.todos.splice(index, 1);
+    state.lastAutoSavedTodoId = undefined;
+    await this.save();
+    return removed;
+  }
+
+  async addReminder(reminder: ReminderItem): Promise<void> {
+    const state = await this.load();
+    state.reminders.unshift(reminder);
+    await this.save();
+  }
+
+  async listReminders(): Promise<ReminderItem[]> {
+    return (await this.load()).reminders;
+  }
+
+  async updateReminder(id: string, patch: Partial<ReminderItem>): Promise<ReminderItem> {
+    const state = await this.load();
+    const index = state.reminders.findIndex((reminder) => reminder.id === id);
+    if (index < 0) throw new Error("Reminder not found");
+    state.reminders[index] = { ...state.reminders[index], ...patch };
+    await this.save();
+    return state.reminders[index];
+  }
+
+  async replaceReminderForTodo(todoId: string, reminder: ReminderItem | null): Promise<void> {
+    const state = await this.load();
+    state.reminders = state.reminders.filter((item) => item.todoId !== todoId);
+    if (reminder) state.reminders.unshift(reminder);
+    await this.save();
+  }
+}
+
+function normalizeSettings(settings: AppSettings): AppSettings {
+  const supportedDeepSeekModels = new Set(["deepseek-v4-flash", "deepseek-v4-pro"]);
+  return {
+    ...settings,
+    openAiModel: supportedDeepSeekModels.has(settings.openAiModel)
+      ? settings.openAiModel
+      : "deepseek-v4-flash",
+    workspaceThemeColor: normalizeThemeColor(settings.workspaceThemeColor),
+    petAppearance: settings.petAppearance?.directory ? settings.petAppearance : undefined
+  };
+}
+
+function normalizeThemeColor(value: string | undefined): string {
+  return typeof value === "string" && /^#[0-9a-fA-F]{6}$/.test(value) ? value : "#5aa982";
+}
