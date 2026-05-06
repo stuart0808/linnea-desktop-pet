@@ -19,6 +19,7 @@ const defaultSettings: AppSettings = {
   systemNotifications: true,
   launchAtLogin: false,
   keepChatHistory: true,
+  selectionToolsEnabled: true,
   workspaceThemeColor: "#5aa982"
 };
 
@@ -174,6 +175,7 @@ function normalizeSettings(settings: AppSettings): AppSettings {
     openAiModel: supportedDeepSeekModels.has(settings.openAiModel)
       ? settings.openAiModel
       : "deepseek-v4-flash",
+    selectionToolsEnabled: settings.selectionToolsEnabled !== false,
     workspaceThemeColor: normalizeThemeColor(settings.workspaceThemeColor),
     petAppearance: settings.petAppearance?.directory ? settings.petAppearance : undefined
   };

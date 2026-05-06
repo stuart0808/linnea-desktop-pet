@@ -1,7 +1,7 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
 import { AlertTriangle, BarChart3, Bell, CalendarDays, Check, FolderOpen, Image as ImageIcon, KeyRound, ListTodo, MessageCircle, Pencil, RotateCcw, Save, Settings, Send, Sparkles, Trash2, X } from "lucide-react";
-import type { AppSettings, ConversationMessage, DesktopPetApi, PetMood, ReminderItem, TodoItem } from "../shared/types";
+import type { AppSettings, ConversationMessage, DesktopPetApi, PetMood, PlanProposal, ReminderItem, SelectionCapture, SelectionTextResult, TodoItem } from "../shared/types";
 import confusedImage from "./assets/pet/linnea_state/_Confused_.png";
 import draggingImage from "./assets/pet/linnea_state/_Dragging_.png";
 import happyImage from "./assets/pet/linnea_state/_Happy_.png";
@@ -16,6 +16,13 @@ import "./styles.css";
 
 type PetVisualState = PetMood | "confused" | "dragging" | "urgent" | "rest" | "sleepy";
 type LocalPetMood = PetMood | "confused";
+type SelectionAction = "summarize" | "translate" | "todo";
+
+interface SelectionPopoverState {
+  text: string;
+  x: number;
+  y: number;
+}
 
 const petStateImages: Record<PetVisualState, string> = {
   idle: idleImage,
@@ -33,7 +40,13 @@ const petStateImages: Record<PetVisualState, string> = {
 const workspaceThemePresets = ["#5aa982", "#4d8fc8", "#d59a3a", "#c56c86", "#8a75c9", "#5c8f7a"];
 
 function App() {
-  const isWorkspaceWindow = new URLSearchParams(window.location.search).get("window") === "workspace";
+  const searchParams = new URLSearchParams(window.location.search);
+  const windowMode = searchParams.get("window");
+  const isWorkspaceWindow = windowMode === "workspace";
+  const isSelectionResultWindow = windowMode === "selection-result";
+  const isSelectionPopoverWindow = windowMode === "selection-popover";
+  const selectionResultId = searchParams.get("id") ?? "";
+  const selectionCaptureId = searchParams.get("id") ?? "";
   const api = window.desktopPet;
   const [messages, setMessages] = React.useState<ConversationMessage[]>([]);
   const [todos, setTodos] = React.useState<TodoItem[]>([]);
@@ -43,6 +56,11 @@ function App() {
   const [chatOpen, setChatOpen] = React.useState(false);
   const [bubble, setBubble] = React.useState("今天也一起把事情整理清楚。");
   const [busy, setBusy] = React.useState(false);
+  const [pendingPlan, setPendingPlan] = React.useState<PlanProposal | null>(null);
+  const [planBusy, setPlanBusy] = React.useState(false);
+  const [thinkingPlaceholder, setThinkingPlaceholder] = React.useState<ConversationMessage | null>(null);
+  const [selectionPopover, setSelectionPopover] = React.useState<SelectionPopoverState | null>(null);
+  const [selectionBusy, setSelectionBusy] = React.useState(false);
   const [activeReminder, setActiveReminder] = React.useState<ReminderItem | null>(null);
   const [focusedTodoId, setFocusedTodoId] = React.useState<string | null>(null);
   const [now, setNow] = React.useState(() => Date.now());
@@ -73,6 +91,21 @@ function App() {
     () => mergePetImages(settings?.petAppearance?.images),
     [settings?.petAppearance?.images]
   );
+
+  React.useEffect(() => {
+    if (!api || (!isSelectionResultWindow && !isSelectionPopoverWindow)) return;
+    void api.settings.get().then(setSettings).catch(() => {
+      // Keep the default theme if settings cannot be read in a transient utility window.
+    });
+  }, [api, isSelectionPopoverWindow, isSelectionResultWindow]);
+
+  if (isSelectionResultWindow) {
+    return <SelectionResultWindow api={api} resultId={selectionResultId} themeStyle={themeStyle} />;
+  }
+
+  if (isSelectionPopoverWindow) {
+    return <GlobalSelectionPopoverWindow api={api} captureId={selectionCaptureId} themeStyle={themeStyle} />;
+  }
 
   function markInteraction() {
     setLastInteractionAt(Date.now());
@@ -148,13 +181,11 @@ function App() {
     return () => window.clearTimeout(timer);
   }, [mood]);
 
-  async function sendMessage(event: React.FormEvent) {
-    event.preventDefault();
-    const text = input.trim();
+  async function sendText(text: string, placeholderText = "我在整理你刚刚说的内容...") {
     if (!text || busy) return;
     setBusy(true);
     markInteraction();
-    setInput("");
+    setSelectionPopover(null);
     const userMessage: ConversationMessage = {
       id: crypto.randomUUID(),
       role: "user",
@@ -162,8 +193,15 @@ function App() {
       createdAt: new Date().toISOString()
     };
     setMessages((current) => [...current, userMessage]);
+    const placeholder: ConversationMessage = {
+      id: `thinking-${crypto.randomUUID()}`,
+      role: "assistant",
+      text: placeholderText,
+      createdAt: new Date().toISOString()
+    };
+    setThinkingPlaceholder(placeholder);
     setMood("thinking");
-    setBubble("我在整理你刚刚说的内容...");
+    setBubble(placeholderText);
     try {
       if (!api) {
         const assistantMessage: ConversationMessage = {
@@ -181,6 +219,7 @@ function App() {
       setMessages(await api.chat.listMessages());
       setMood(result.mood);
       setBubble(result.assistantMessage.text);
+      setPendingPlan(result.planProposal ?? null);
       if (result.extractedTodos.length) {
         setTodos(await api.todo.list());
       }
@@ -188,9 +227,28 @@ function App() {
       setMood("confused");
       setBubble(error instanceof Error ? error.message : "对话失败，请稍后再试。");
     } finally {
+      setThinkingPlaceholder(null);
       setBusy(false);
     }
   }
+
+  async function sendMessage(event: React.FormEvent) {
+    event.preventDefault();
+    const text = input.trim();
+    if (!text || busy) return;
+    setInput("");
+    await sendText(text);
+  }
+
+  React.useEffect(() => {
+    if (!api || !isWorkspaceWindow) return;
+    return api.events.onSelectedTextTodo((text) => {
+      void sendText(
+        `请根据下面这段从全局选区捕获的文字生成待办。如果它是复杂目标，请拆成可确认的计划步骤；如果只是单个事项，请生成一条待办：\n\n${text}`,
+        "我在从选中文字里整理待办..."
+      );
+    });
+  }, [api, isWorkspaceWindow, busy]);
 
   async function toggleTodo(todo: TodoItem) {
     if (!api) return;
@@ -227,6 +285,76 @@ function App() {
       setMood("happy");
       setBubble(`已撤销：${removed.title}`);
     }
+  }
+
+  async function acceptPendingPlan() {
+    if (!api || !pendingPlan || planBusy) return;
+    markInteraction();
+    setPlanBusy(true);
+    try {
+      const saved = await api.todo.acceptPlanProposal(pendingPlan.items, pendingPlan.sourceMessage);
+      setTodos(await api.todo.list());
+      setPendingPlan(null);
+      setMood("happy");
+      setBubble(`已写入 ${saved.todos.length} 个待办。`);
+    } catch (error) {
+      setMood("confused");
+      setBubble(error instanceof Error ? error.message : "写入计划失败，请稍后再试。");
+    } finally {
+      setPlanBusy(false);
+    }
+  }
+
+  function dismissPendingPlan() {
+    markInteraction();
+    setPendingPlan(null);
+    setBubble("好的，这个计划先不写入。");
+  }
+
+  function updateSelectionPopover() {
+    if (!isWorkspaceWindow) return;
+    window.setTimeout(() => {
+      const selection = window.getSelection();
+      const text = selection?.toString().trim() ?? "";
+      if (!selection || text.length < 2 || selection.rangeCount === 0) {
+        setSelectionPopover(null);
+        return;
+      }
+      const range = selection.getRangeAt(0);
+      const rect = range.getBoundingClientRect();
+      if (!rect.width && !rect.height) {
+        setSelectionPopover(null);
+        return;
+      }
+      setSelectionPopover({
+        text: text.slice(0, 4000),
+        x: Math.min(window.innerWidth - 220, Math.max(12, rect.left + rect.width / 2 - 110)),
+        y: Math.min(window.innerHeight - 54, Math.max(12, rect.top - 46))
+      });
+    }, 0);
+  }
+
+  async function runSelectionAction(action: SelectionAction, selectedText: string) {
+    if ((action === "summarize" || action === "translate") && api) {
+      markInteraction();
+      setSelectionPopover(null);
+      setSelectionBusy(true);
+      try {
+        await api.selection.process(action, selectedText);
+      } catch (error) {
+        setBubble(error instanceof Error ? error.message : "处理选中文字失败。");
+      } finally {
+        setSelectionBusy(false);
+      }
+      return;
+    }
+    const prompts: Record<SelectionAction, string> = {
+      summarize: `请用简洁中文总结下面这段选中文字，保留关键事实和行动点：\n\n${selectedText}`,
+      translate: `请把下面这段选中文字翻译成自然中文；如果原文已经是中文，请改写得更清晰：\n\n${selectedText}`,
+      todo: `请根据下面这段选中文字生成待办。如果它是复杂目标，请拆成可确认的计划步骤；如果只是单个事项，请生成一条待办：\n\n${selectedText}`
+    };
+    const placeholderText = action === "todo" ? "我在从选中文字里整理待办..." : "我在处理选中的文字...";
+    await sendText(prompts[action], placeholderText);
   }
 
   async function updateSettings(patch: Partial<AppSettings>) {
@@ -346,6 +474,11 @@ function App() {
         messages={messages}
         todos={todos}
         settings={settings}
+        pendingPlan={pendingPlan}
+        planBusy={planBusy}
+        thinkingPlaceholder={thinkingPlaceholder}
+        selectionPopover={selectionPopover}
+        selectionBusy={selectionBusy}
         input={input}
         busy={busy}
         onInputChange={setInput}
@@ -354,6 +487,11 @@ function App() {
         onUpdateTodo={updateTodo}
         onDeleteTodo={deleteTodo}
         onUndoAutoSave={undoAutoSave}
+        onAcceptPlan={acceptPendingPlan}
+        onDismissPlan={dismissPendingPlan}
+        onSelectionUpdate={updateSelectionPopover}
+        onSelectionAction={(action, text) => void runSelectionAction(action, text)}
+        onSelectionClose={() => setSelectionPopover(null)}
         onUpdateSettings={updateSettings}
         onClearMessages={clearMessages}
         onSelectPetAppearance={selectPetAppearance}
@@ -392,7 +530,22 @@ function App() {
                   {message.text}
                 </div>
               ))}
+              {thinkingPlaceholder && (
+                <div className="message assistant thinking-message">
+                  <span className="typing-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+                  {thinkingPlaceholder.text}
+                </div>
+              )}
             </div>
+            {pendingPlan && (
+              <PlanProposalCard
+                plan={pendingPlan}
+                compact
+                busy={planBusy}
+                onAccept={() => void acceptPendingPlan()}
+                onDismiss={dismissPendingPlan}
+              />
+            )}
             <form className="mini-composer" onSubmit={sendMessage}>
               <input
                 value={input}
@@ -429,6 +582,11 @@ function WorkspaceWindow({
   messages,
   todos,
   settings,
+  pendingPlan,
+  planBusy,
+  thinkingPlaceholder,
+  selectionPopover,
+  selectionBusy,
   input,
   busy,
   onInputChange,
@@ -437,6 +595,11 @@ function WorkspaceWindow({
   onUpdateTodo,
   onDeleteTodo,
   onUndoAutoSave,
+  onAcceptPlan,
+  onDismissPlan,
+  onSelectionUpdate,
+  onSelectionAction,
+  onSelectionClose,
   onUpdateSettings,
   onClearMessages,
   onSelectPetAppearance,
@@ -448,6 +611,11 @@ function WorkspaceWindow({
   messages: ConversationMessage[];
   todos: TodoItem[];
   settings: AppSettings | null;
+  pendingPlan: PlanProposal | null;
+  planBusy: boolean;
+  thinkingPlaceholder: ConversationMessage | null;
+  selectionPopover: SelectionPopoverState | null;
+  selectionBusy: boolean;
   input: string;
   busy: boolean;
   onInputChange(value: string): void;
@@ -456,6 +624,11 @@ function WorkspaceWindow({
   onUpdateTodo(todo: TodoItem, patch: Partial<Pick<TodoItem, "title" | "remindAt" | "dueAt">>): void;
   onDeleteTodo(todo: TodoItem): void;
   onUndoAutoSave(): void;
+  onAcceptPlan(): void;
+  onDismissPlan(): void;
+  onSelectionUpdate(): void;
+  onSelectionAction(action: SelectionAction, text: string): void;
+  onSelectionClose(): void;
   onUpdateSettings(patch: Partial<AppSettings>): void;
   onClearMessages(): void;
   onSelectPetAppearance(): void;
@@ -490,7 +663,18 @@ function WorkspaceWindow({
   }
 
   return (
-    <main className="workspace-shell" style={themeStyle}>
+    <main className="workspace-shell" style={themeStyle} onMouseUp={onSelectionUpdate} onKeyUp={onSelectionUpdate}>
+      {selectionPopover && (
+        <SelectionPopover
+          selection={selectionPopover}
+          busy={busy || selectionBusy}
+          onAction={onSelectionAction}
+          onClose={() => {
+            window.getSelection()?.removeAllRanges();
+            onSelectionClose();
+          }}
+        />
+      )}
       <aside className="workspace-sidebar">
         <div className="workspace-brand">
           <strong>Linnea</strong>
@@ -542,6 +726,20 @@ function WorkspaceWindow({
                     {message.text}
                   </div>
                 ))}
+                {thinkingPlaceholder && (
+                  <div className="message assistant thinking-message">
+                    <span className="typing-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+                    {thinkingPlaceholder.text}
+                  </div>
+                )}
+                {pendingPlan && (
+                  <PlanProposalCard
+                    plan={pendingPlan}
+                    busy={planBusy}
+                    onAccept={onAcceptPlan}
+                    onDismiss={onDismissPlan}
+                  />
+                )}
               </div>
               <form className="workspace-composer" onSubmit={onSendMessage}>
                 <input
@@ -610,6 +808,349 @@ function mergePetImages(customImages?: Partial<Record<string, string>>): Record<
     if (customImage) images[state] = customImage;
   }
   return images;
+}
+
+function PlanProposalCard({
+  plan,
+  compact = false,
+  busy,
+  onAccept,
+  onDismiss
+}: {
+  plan: PlanProposal;
+  compact?: boolean;
+  busy: boolean;
+  onAccept(): void;
+  onDismiss(): void;
+}) {
+  const visibleItems = compact ? plan.items.slice(0, 4) : plan.items;
+  return (
+    <section className={`plan-card ${compact ? "compact" : ""}`}>
+      <div className="plan-card-header">
+        <div>
+          <strong>{plan.summary || "计划建议"}</strong>
+          <span>确认后会一起写入待办</span>
+        </div>
+        <Sparkles size={16} />
+      </div>
+      <div className="plan-items">
+        {visibleItems.map((item, index) => (
+          <div key={`${item.title}-${index}`} className="plan-item">
+            <span className="plan-index">{index + 1}</span>
+            <div>
+              <strong>{item.title}</strong>
+              {(item.remindAt || item.dueAt) && <small>{formatPlanTime(item.remindAt ?? item.dueAt)}</small>}
+              {item.notes && !compact && <p>{item.notes}</p>}
+            </div>
+          </div>
+        ))}
+        {compact && plan.items.length > visibleItems.length && (
+          <div className="plan-more">还有 {plan.items.length - visibleItems.length} 个步骤</div>
+        )}
+      </div>
+      <div className="plan-actions">
+        <button type="button" onClick={onAccept} disabled={busy}>
+          <Check size={14} /> {busy ? "写入中..." : "确认写入"}
+        </button>
+        <button type="button" onClick={onDismiss} disabled={busy}>
+          <X size={14} /> 暂不写入
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function SelectionPopover({
+  selection,
+  busy,
+  onAction,
+  onClose
+}: {
+  selection: SelectionPopoverState;
+  busy: boolean;
+  onAction(action: SelectionAction, text: string): void;
+  onClose(): void;
+}) {
+  return (
+    <section
+      className="selection-popover"
+      style={{ left: selection.x, top: selection.y }}
+      onMouseDown={(event) => event.preventDefault()}
+    >
+      <button type="button" disabled={busy} onClick={() => onAction("summarize", selection.text)}>
+        总结
+      </button>
+      <button type="button" disabled={busy} onClick={() => onAction("translate", selection.text)}>
+        翻译
+      </button>
+      <button type="button" disabled={busy} onClick={() => onAction("todo", selection.text)}>
+        生成待办
+      </button>
+      <button type="button" disabled={busy} aria-label="关闭选中文本操作" onClick={onClose}>
+        <X size={13} />
+      </button>
+    </section>
+  );
+}
+
+const translationLanguageOptions = [
+  { value: "auto", label: "自动" },
+  { value: "中文", label: "中文" },
+  { value: "English", label: "English" },
+  { value: "日本語", label: "日本語" },
+  { value: "한국어", label: "한국어" },
+  { value: "Français", label: "Français" },
+  { value: "Deutsch", label: "Deutsch" }
+];
+
+function SelectionResultWindow({
+  api,
+  resultId,
+  themeStyle
+}: {
+  api?: DesktopPetApi;
+  resultId: string;
+  themeStyle: React.CSSProperties;
+}) {
+  const [result, setResult] = React.useState<SelectionTextResult | null>(null);
+  const [error, setError] = React.useState("");
+
+  React.useEffect(() => {
+    if (!api) {
+      setError("Electron API 未连接。");
+      return;
+    }
+    if (!resultId) {
+      setError("结果 ID 缺失。");
+      return;
+    }
+    let disposed = false;
+    let timer: number | undefined;
+    const load = async () => {
+      try {
+        const value = await api.selection.getResult(resultId);
+        if (disposed) return;
+        if (!value) {
+          setError("没有找到这次处理结果。");
+          return;
+        }
+        setResult(value);
+        if (value.status === "pending") {
+          timer = window.setTimeout(load, 500);
+        } else if (value.status === "error") {
+          setError(value.error ?? "处理失败。");
+        }
+      } catch (reason) {
+        if (!disposed) setError(reason instanceof Error ? reason.message : "读取结果失败。");
+      }
+    };
+    void load();
+    return () => {
+      disposed = true;
+      if (timer) window.clearTimeout(timer);
+    };
+  }, [api, resultId]);
+
+  React.useEffect(() => {
+    if (!api || !resultId || result?.status !== "pending") return;
+    const timer = window.setInterval(() => {
+      void api.selection.getResult(resultId).then((value) => {
+        if (value) {
+          setResult(value);
+          if (value.status === "error") setError(value.error ?? "处理失败。");
+        }
+      });
+    }, 500);
+    return () => window.clearInterval(timer);
+  }, [api, result?.status, resultId]);
+
+  const loadingText = result?.action === "translate" ? "正在翻译中..." : result?.action === "summarize" ? "正在总结中..." : "正在加载结果...";
+
+  async function changeTargetLanguage(targetLanguage: string) {
+    if (!api || !result || result.action !== "translate" || result.status === "pending") return;
+    setError("");
+    const pending = await api.selection.retranslate(result.id, targetLanguage);
+    setResult(pending);
+  }
+
+  return (
+    <main className="selection-result-shell" style={themeStyle}>
+      <header className="selection-result-header">
+        <div className="selection-result-title">
+          <strong>{result?.title ?? "Linnea"}</strong>
+          {result?.action === "translate" && (
+            <label className="translation-target">
+              <span>目标语言</span>
+              <select
+                value={result.targetLanguage ?? "auto"}
+                disabled={result.status === "pending"}
+                onChange={(event) => void changeTargetLanguage(event.target.value)}
+              >
+                {translationLanguageOptions.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+          )}
+        </div>
+        {result && <span>{new Date(result.createdAt).toLocaleString()}</span>}
+      </header>
+      <section className="selection-result-body">
+        {error ? (
+          <div className="summary-error">{error}</div>
+        ) : result && result.status !== "pending" && result.markdown ? (
+          <MarkdownView markdown={result.markdown} />
+        ) : (
+          <div className="selection-result-loading">
+            <span className="typing-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+            {loadingText}
+          </div>
+        )}
+      </section>
+    </main>
+  );
+}
+
+function GlobalSelectionPopoverWindow({
+  api,
+  captureId,
+  themeStyle
+}: {
+  api?: DesktopPetApi;
+  captureId: string;
+  themeStyle: React.CSSProperties;
+}) {
+  const [capture, setCapture] = React.useState<SelectionCapture | null>(null);
+  const [busyAction, setBusyAction] = React.useState<SelectionAction | null>(null);
+  const [error, setError] = React.useState("");
+
+  React.useEffect(() => {
+    if (!api) {
+      setError("API 未连接");
+      return;
+    }
+    if (!captureId) {
+      setError("选区丢失");
+      return;
+    }
+    void api.selection.getCapture(captureId)
+      .then((value) => {
+        if (value) setCapture(value);
+        else setError("选区已失效");
+      })
+      .catch(() => setError("读取选区失败"));
+  }, [api, captureId]);
+
+  React.useEffect(() => {
+    if (busyAction) return;
+    const timer = window.setTimeout(() => window.close(), 4500);
+    return () => window.clearTimeout(timer);
+  }, [busyAction]);
+
+  async function runAction(action: SelectionAction) {
+    if (!api || !capture || busyAction) return;
+    setBusyAction(action);
+    setError("");
+    try {
+      if (action === "todo") {
+        await api.selection.createTodoFromCapture(capture.id);
+      } else {
+        await api.selection.process(action, capture.text);
+      }
+      window.close();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "处理失败");
+      setBusyAction(null);
+    }
+  }
+
+  return (
+    <main className="global-selection-popover-shell" style={themeStyle}>
+      {error ? (
+        <div className="global-selection-error">{error}</div>
+      ) : (
+        <>
+          <button type="button" disabled={!capture || Boolean(busyAction)} onClick={() => void runAction("summarize")}>
+            {busyAction === "summarize" ? "总结中..." : "总结"}
+          </button>
+          <button type="button" disabled={!capture || Boolean(busyAction)} onClick={() => void runAction("translate")}>
+            {busyAction === "translate" ? "翻译中..." : "翻译"}
+          </button>
+          <button type="button" disabled={!capture || Boolean(busyAction)} onClick={() => void runAction("todo")}>
+            {busyAction === "todo" ? "整理中..." : "生成待办"}
+          </button>
+          <button type="button" aria-label="关闭" onClick={() => window.close()}>
+            <X size={13} />
+          </button>
+        </>
+      )}
+    </main>
+  );
+}
+
+function MarkdownView({ markdown }: { markdown: string }) {
+  const lines = markdown.split(/\r?\n/);
+  const blocks: React.ReactNode[] = [];
+  let listItems: string[] = [];
+
+  function flushList() {
+    if (!listItems.length) return;
+    blocks.push(
+      <ul key={`list-${blocks.length}`}>
+        {listItems.map((item, index) => <li key={`${item}-${index}`}>{renderInlineMarkdown(item)}</li>)}
+      </ul>
+    );
+    listItems = [];
+  }
+
+  lines.forEach((line, index) => {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      flushList();
+      return;
+    }
+    const heading = /^(#{1,3})\s+(.+)$/.exec(trimmed);
+    if (heading) {
+      flushList();
+      const level = heading[1].length;
+      const content = renderInlineMarkdown(heading[2]);
+      blocks.push(level === 1
+        ? <h1 key={index}>{content}</h1>
+        : level === 2
+          ? <h2 key={index}>{content}</h2>
+          : <h3 key={index}>{content}</h3>);
+      return;
+    }
+    const list = /^[-*]\s+(.+)$/.exec(trimmed) ?? /^\d+\.\s+(.+)$/.exec(trimmed);
+    if (list) {
+      listItems.push(list[1]);
+      return;
+    }
+    flushList();
+    blocks.push(<p key={index}>{renderInlineMarkdown(trimmed)}</p>);
+  });
+  flushList();
+
+  return <article className="markdown-output">{blocks}</article>;
+}
+
+function renderInlineMarkdown(text: string) {
+  const nodes: React.ReactNode[] = [];
+  const pattern = /(\*\*[^*]+\*\*|`[^`]+`)/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(text))) {
+    if (match.index > lastIndex) nodes.push(text.slice(lastIndex, match.index));
+    const token = match[0];
+    if (token.startsWith("**")) {
+      nodes.push(<strong key={`${token}-${match.index}`}>{token.slice(2, -2)}</strong>);
+    } else {
+      nodes.push(<code key={`${token}-${match.index}`}>{token.slice(1, -1)}</code>);
+    }
+    lastIndex = match.index + token.length;
+  }
+  if (lastIndex < text.length) nodes.push(text.slice(lastIndex));
+  return nodes;
 }
 
 function SummaryPanel({
@@ -907,6 +1448,18 @@ function formatTodoTimelineTime(todo: TodoItem) {
     : "全天";
 }
 
+function formatPlanTime(value?: string) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "";
+  return date.toLocaleString(undefined, {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+}
+
 function isTimeInRange(value: string | undefined, start: number, end: number) {
   if (!value) return false;
   const time = new Date(value).getTime();
@@ -1136,6 +1689,7 @@ function SettingsPanel({
         <div className="setting-hint">文件夹名需为 {"{角色名}_state"}，图片文件名如 _Idle_.png、_Talking_.png。</div>
       </section>
       <Toggle label="自动保存待办" checked={settings.autoSaveTodos} onChange={(value) => onChange({ autoSaveTodos: value })} />
+      <Toggle label="浮窗工具" checked={settings.selectionToolsEnabled} onChange={(value) => onChange({ selectionToolsEnabled: value })} />
       <Toggle label="系统通知" checked={settings.systemNotifications} onChange={(value) => onChange({ systemNotifications: value })} />
       <Toggle label="始终置顶" checked={settings.alwaysOnTop} onChange={(value) => onChange({ alwaysOnTop: value })} />
       <button className="clear-chat-button" onClick={onClearMessages}>

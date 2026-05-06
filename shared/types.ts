@@ -40,6 +40,7 @@ export interface AppSettings {
   systemNotifications: boolean;
   launchAtLogin: boolean;
   keepChatHistory: boolean;
+  selectionToolsEnabled: boolean;
   workspaceThemeColor: string;
   petAppearance?: PetAppearance;
 }
@@ -58,10 +59,21 @@ export interface TodoCandidate {
   confidence: number;
 }
 
+export type TaskIntent = "none" | "simple_todo" | "complex_goal";
+
+export interface PlanProposal {
+  summary: string;
+  sourceMessage: string;
+  needsConfirmation: boolean;
+  items: TodoCandidate[];
+}
+
 export interface ModelStructuredResult {
   replyText: string;
   mood: PetMood;
+  taskIntent: TaskIntent;
   todoCandidates: TodoCandidate[];
+  planProposal?: PlanProposal | null;
 }
 
 export interface ChatResult {
@@ -69,6 +81,7 @@ export interface ChatResult {
   extractedTodos: TodoItem[];
   reminders: ReminderItem[];
   mood: PetMood;
+  planProposal?: PlanProposal | null;
 }
 
 export interface AppSnapshot {
@@ -76,6 +89,26 @@ export interface AppSnapshot {
   reminders: ReminderItem[];
   messages: ConversationMessage[];
   settings: AppSettings;
+}
+
+export type SelectionTextAction = "summarize" | "translate";
+
+export interface SelectionTextResult {
+  id: string;
+  action: SelectionTextAction;
+  title: string;
+  markdown: string;
+  status?: "pending" | "done" | "error";
+  error?: string;
+  targetLanguage?: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface SelectionCapture {
+  id: string;
+  text: string;
+  createdAt: string;
 }
 
 export interface DesktopPetApi {
@@ -89,6 +122,7 @@ export interface DesktopPetApi {
     update(id: string, patch: Partial<Pick<TodoItem, "title" | "notes" | "status" | "dueAt" | "remindAt">>): Promise<TodoItem>;
     delete(id: string): Promise<TodoItem>;
     undoLastAutoSave(): Promise<TodoItem | null>;
+    acceptPlanProposal(items: TodoCandidate[], sourceMessage: string): Promise<{ todos: TodoItem[]; reminders: ReminderItem[] }>;
   };
   reminder: {
     list(): Promise<ReminderItem[]>;
@@ -108,6 +142,13 @@ export interface DesktopPetApi {
   summary: {
     generate(): Promise<string>;
   };
+  selection: {
+    process(action: SelectionTextAction, text: string, targetLanguage?: string): Promise<SelectionTextResult>;
+    retranslate(id: string, targetLanguage: string): Promise<SelectionTextResult>;
+    getResult(id: string): Promise<SelectionTextResult | null>;
+    getCapture(id: string): Promise<SelectionCapture | null>;
+    createTodoFromCapture(id: string): Promise<void>;
+  };
   app: {
     snapshot(): Promise<AppSnapshot>;
     setIgnoreMouseEvents(ignore: boolean): Promise<void>;
@@ -122,6 +163,7 @@ export interface DesktopPetApi {
     onReminderFired(callback: (reminder: ReminderItem) => void): () => void;
     onSnapshotUpdated(callback: () => void): () => void;
     onTodoFocus(callback: (todoId: string) => void): () => void;
+    onSelectedTextTodo(callback: (text: string) => void): () => void;
   };
 }
 

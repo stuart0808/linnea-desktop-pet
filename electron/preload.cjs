@@ -10,7 +10,8 @@ const api = {
     list: () => ipcRenderer.invoke("todo:list"),
     update: (id, patch) => ipcRenderer.invoke("todo:update", id, patch),
     delete: (id) => ipcRenderer.invoke("todo:delete", id),
-    undoLastAutoSave: () => ipcRenderer.invoke("todo:undoLastAutoSave")
+    undoLastAutoSave: () => ipcRenderer.invoke("todo:undoLastAutoSave"),
+    acceptPlanProposal: (items, sourceMessage) => ipcRenderer.invoke("todo:acceptPlanProposal", items, sourceMessage)
   },
   reminder: {
     list: () => ipcRenderer.invoke("reminder:list"),
@@ -29,6 +30,13 @@ const api = {
   },
   summary: {
     generate: () => ipcRenderer.invoke("summary:generate")
+  },
+  selection: {
+    process: (action, text, targetLanguage) => ipcRenderer.invoke("selection:process", action, text, targetLanguage),
+    retranslate: (id, targetLanguage) => ipcRenderer.invoke("selection:retranslate", id, targetLanguage),
+    getResult: (id) => ipcRenderer.invoke("selection:getResult", id),
+    getCapture: (id) => ipcRenderer.invoke("selection:getCapture", id),
+    createTodoFromCapture: (id) => ipcRenderer.invoke("selection:createTodoFromCapture", id)
   },
   app: {
     snapshot: () => ipcRenderer.invoke("app:snapshot"),
@@ -58,6 +66,11 @@ const api = {
       const listener = (_event, todoId) => callback(todoId);
       ipcRenderer.on("todo:focus", listener);
       return () => ipcRenderer.removeListener("todo:focus", listener);
+    },
+    onSelectedTextTodo: (callback) => {
+      const listener = (_event, text) => callback(text);
+      ipcRenderer.on("selection:todoText", listener);
+      return () => ipcRenderer.removeListener("selection:todoText", listener);
     }
   }
 };

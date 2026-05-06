@@ -1,12 +1,13 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Notification, screen, shell, Tray, WebContents } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, Notification, screen, shell, Tray, WebContents } from "electron";
 import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { pathToFileURL } from "node:url";
 import { basename, dirname, extname, join } from "node:path";
-import type { AppSettings, ChatResult, PetAppearance, ReminderItem, TodoItem } from "../../shared/types.js";
-import { askPetAssistant, summarizeRecentContext } from "./openaiClient.js";
+import { uIOhook, UiohookKey, type UiohookMouseEvent } from "uiohook-napi";
+import type { AppSettings, ChatResult, PetAppearance, ReminderItem, SelectionCapture, SelectionTextAction, SelectionTextResult, TodoCandidate, TodoItem } from "../../shared/types.js";
+import { askPetAssistant, processSelectedText, summarizeRecentContext } from "./openaiClient.js";
 import { JsonStore } from "./storage.js";
 import type { OpenDialogOptions } from "electron";
 
@@ -21,12 +22,20 @@ if (process.platform === "win32") {
 
 let mainWindow: BrowserWindow | null = null;
 let workspaceWindow: BrowserWindow | null = null;
+let selectionPopoverWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let isQuitting = false;
 const reminderTimers = new Map<string, NodeJS.Timeout>();
+const selectionResults = new Map<string, SelectionTextResult>();
+const selectionCaptures = new Map<string, SelectionCapture>();
+const selectionResultSources = new Map<string, string>();
 const collapsedPetBounds = { width: 180, height: 300 };
 const expandedPetBounds = { width: 390, height: 560 };
 let windowDragState: { window: BrowserWindow; offsetX: number; offsetY: number } | null = null;
+let globalSelectionHookStarted = false;
+let globalMouseDown: { x: number; y: number; time: number; insideAppWindow: boolean } | null = null;
+let globalSelectionCaptureInFlight = false;
+type ClipboardSnapshot = ReturnType<typeof readClipboardSnapshot>;
 const petStateNames = ["Idle", "Talking", "Happy", "Thinking", "Reminder", "Confused", "Dragging", "Urgent", "Rest", "Sleepy"] as const;
 const supportedPetImageExtensions = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif", ".avif"]);
 
@@ -34,7 +43,7 @@ function getPreloadPath() {
   return join(__dirname, "../../../electron/preload.cjs");
 }
 
-function getRendererUrl(windowMode?: "workspace") {
+function getRendererUrl(windowMode?: "workspace" | "selection-result" | "selection-popover") {
   const query = windowMode ? `window=${windowMode}` : "";
   return process.env.VITE_DEV_SERVER_URL
     ? `${process.env.VITE_DEV_SERVER_URL}${query ? `?${query}` : ""}`
@@ -217,6 +226,110 @@ async function openWorkspaceWindow(todoId?: string) {
   await workspaceWindow.loadURL(getRendererUrl("workspace"));
 }
 
+async function openSelectionResultWindow(result: SelectionTextResult) {
+  const resultWindow = new BrowserWindow({
+    width: 520,
+    height: 420,
+    minWidth: 360,
+    minHeight: 260,
+    show: false,
+    title: result.title,
+    icon: getAppIconPath(),
+    backgroundColor: "#f7fbf8",
+    resizable: true,
+    alwaysOnTop: false,
+    skipTaskbar: false,
+    webPreferences: {
+      preload: getPreloadPath(),
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  });
+
+  resultWindow.setMenuBarVisibility(false);
+  resultWindow.once("ready-to-show", () => {
+    resultWindow.show();
+    resultWindow.focus();
+  });
+  await resultWindow.loadURL(getRendererUrl("selection-result") + `&id=${encodeURIComponent(result.id)}`);
+}
+
+async function processSelectionResultInBackground(result: SelectionTextResult, text: string, targetLanguage?: string) {
+  try {
+    const settings = await store.getSettings();
+    const apiKey = settings.openAiApiKey || process.env.DEEPSEEK_API_KEY || process.env.OPENAI_API_KEY;
+    const markdown = await processSelectedText({
+      apiKey,
+      model: settings.openAiModel,
+      action: result.action,
+      text,
+      targetLanguage
+    });
+    selectionResults.set(result.id, {
+      ...result,
+      markdown,
+      status: "done",
+      targetLanguage,
+      updatedAt: new Date().toISOString()
+    });
+  } catch (error) {
+    selectionResults.set(result.id, {
+      ...result,
+      status: "error",
+      error: error instanceof Error ? error.message : "处理失败",
+      targetLanguage,
+      updatedAt: new Date().toISOString()
+    });
+  }
+}
+
+async function openSelectionPopoverWindow(capture: SelectionCapture, x: number, y: number) {
+  if (selectionPopoverWindow && !selectionPopoverWindow.isDestroyed()) {
+    selectionPopoverWindow.close();
+  }
+  const display = screen.getDisplayNearestPoint({ x, y });
+  const width = 252;
+  const height = 48;
+  const bounds = display.workArea;
+  const preferredX = x + 14;
+  const preferredY = y + 14;
+  const fallbackX = x - width - 14;
+  const fallbackY = y - height - 14;
+  const targetX = preferredX + width <= bounds.x + bounds.width - 8 ? preferredX : fallbackX;
+  const targetY = preferredY + height <= bounds.y + bounds.height - 8 ? preferredY : fallbackY;
+
+  selectionPopoverWindow = new BrowserWindow({
+    width,
+    height,
+    x: Math.round(Math.min(bounds.x + bounds.width - width - 8, Math.max(bounds.x + 8, targetX))),
+    y: Math.round(Math.min(bounds.y + bounds.height - height - 8, Math.max(bounds.y + 8, targetY))),
+    show: false,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    focusable: true,
+    title: "Linnea 选中文本",
+    icon: getAppIconPath(),
+    backgroundColor: "#00000000",
+    webPreferences: {
+      preload: getPreloadPath(),
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  });
+
+  selectionPopoverWindow.setMenuBarVisibility(false);
+  selectionPopoverWindow.once("ready-to-show", () => {
+    selectionPopoverWindow?.showInactive();
+  });
+  selectionPopoverWindow.on("closed", () => {
+    selectionPopoverWindow = null;
+  });
+  await selectionPopoverWindow.loadURL(getRendererUrl("selection-popover") + `&id=${encodeURIComponent(capture.id)}`);
+}
+
 async function openReminderTarget(reminder: ReminderItem) {
   await openWorkspaceWindow(reminder.todoId);
 }
@@ -252,6 +365,129 @@ function createTray() {
       { label: "退出", click: () => app.quit() }
     ])
   );
+}
+
+function registerGlobalSelectionHook() {
+  if (process.platform !== "win32" || globalSelectionHookStarted) return;
+  try {
+    uIOhook.on("mousedown", (event: UiohookMouseEvent) => {
+      globalMouseDown = { x: event.x, y: event.y, time: Date.now(), insideAppWindow: isPointInsideAppWindow(event.x, event.y) };
+    });
+    uIOhook.on("mouseup", (event: UiohookMouseEvent) => {
+      const start = globalMouseDown;
+      globalMouseDown = null;
+      if (!start) return;
+      if (start.insideAppWindow) return;
+      const distance = Math.hypot(event.x - start.x, event.y - start.y);
+      const duration = Date.now() - start.time;
+      if (distance < 10 || duration < 120) return;
+      void captureGlobalSelectedText(event.x, event.y);
+    });
+    uIOhook.start();
+    globalSelectionHookStarted = true;
+  } catch (error) {
+    console.error("Failed to start global selection hook", error);
+  }
+}
+
+function unregisterGlobalSelectionHook() {
+  if (process.platform !== "win32") return;
+  try {
+    if (globalSelectionHookStarted) uIOhook.stop();
+    uIOhook.removeAllListeners("mousedown");
+    uIOhook.removeAllListeners("mouseup");
+  } catch {
+    // ignore hook shutdown errors
+  } finally {
+    globalSelectionHookStarted = false;
+    globalMouseDown = null;
+  }
+}
+
+async function syncGlobalSelectionHook() {
+  const settings = await store.getSettings();
+  if (settings.selectionToolsEnabled) {
+    registerGlobalSelectionHook();
+  } else {
+    unregisterGlobalSelectionHook();
+  }
+}
+
+function isPointInsideAppWindow(x: number, y: number) {
+  return BrowserWindow.getAllWindows().some((window) => {
+    if (window.isDestroyed() || !window.isVisible()) return false;
+    const bounds = window.getBounds();
+    return x >= bounds.x && x <= bounds.x + bounds.width && y >= bounds.y && y <= bounds.y + bounds.height;
+  });
+}
+
+async function captureGlobalSelectedText(x: number, y: number) {
+  if (globalSelectionCaptureInFlight) return;
+
+  globalSelectionCaptureInFlight = true;
+  const previousClipboard = readClipboardSnapshot();
+  const marker = `__LINNEA_SELECTION_${randomUUID()}__`;
+  clipboard.writeText(marker);
+  try {
+    await delay(140);
+    copySelectedTextToClipboard();
+    let selectedText = await waitForClipboardTextChange(marker, 900);
+    if (!selectedText) {
+      await delay(120);
+      copySelectedTextToClipboard();
+      selectedText = await waitForClipboardTextChange(marker, 900);
+    }
+    if (!selectedText || selectedText === marker || selectedText.length < 2) return;
+    const capture: SelectionCapture = {
+      id: randomUUID(),
+      text: selectedText.slice(0, 8000),
+      createdAt: new Date().toISOString()
+    };
+    selectionCaptures.set(capture.id, capture);
+    await openSelectionPopoverWindow(capture, x, y);
+  } finally {
+    restoreClipboardSnapshot(previousClipboard);
+    globalSelectionCaptureInFlight = false;
+  }
+}
+
+function copySelectedTextToClipboard() {
+  uIOhook.keyToggle(UiohookKey.Ctrl, "down");
+  uIOhook.keyTap(UiohookKey.C);
+  uIOhook.keyToggle(UiohookKey.Ctrl, "up");
+}
+
+async function waitForClipboardTextChange(marker: string, timeoutMs: number) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    await delay(50);
+    const text = clipboard.readText().trim();
+    if (text && text !== marker) return text;
+  }
+  return "";
+}
+
+function delay(ms: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, ms));
+}
+
+function readClipboardSnapshot() {
+  return {
+    text: clipboard.readText(),
+    html: clipboard.readHTML(),
+    rtf: clipboard.readRTF(),
+    image: clipboard.readImage()
+  };
+}
+
+function restoreClipboardSnapshot(snapshot: ClipboardSnapshot) {
+  clipboard.clear();
+  const data: Electron.Data = {};
+  if (snapshot.text) data.text = snapshot.text;
+  if (snapshot.html) data.html = snapshot.html;
+  if (snapshot.rtf) data.rtf = snapshot.rtf;
+  if (!snapshot.image.isEmpty()) data.image = snapshot.image;
+  if (Object.keys(data).length) clipboard.write(data);
 }
 
 function toggleWindow() {
@@ -380,6 +616,24 @@ function createReminder(todo: TodoItem, message?: string): ReminderItem | null {
   };
 }
 
+async function saveTodoCandidates(candidates: TodoCandidate[], sourceMessage: string, autoSaved: boolean) {
+  const todos: TodoItem[] = [];
+  const reminders: ReminderItem[] = [];
+  for (const candidate of candidates) {
+    if (!candidate.title?.trim() || candidate.confidence < 0.45) continue;
+    const todo = createTodo(candidate, sourceMessage);
+    await store.addTodo(todo, autoSaved);
+    todos.push(todo);
+    const reminder = createReminder(todo);
+    if (reminder) {
+      await store.addReminder(reminder);
+      reminders.push(reminder);
+    }
+  }
+  if (todos.length || reminders.length) await refreshReminderTimers();
+  return { todos, reminders };
+}
+
 async function selectPetAppearance(sender: WebContents): Promise<PetAppearance | null> {
   const owner = BrowserWindow.fromWebContents(sender) ?? workspaceWindow ?? mainWindow;
   const options: OpenDialogOptions = {
@@ -485,21 +739,12 @@ function registerIpc() {
     };
     await store.addMessage(assistantMessage);
 
-    const extractedTodos: TodoItem[] = [];
-    const reminders: ReminderItem[] = [];
+    let extractedTodos: TodoItem[] = [];
+    let reminders: ReminderItem[] = [];
     if (settings.autoSaveTodos) {
-      for (const candidate of modelResult.todoCandidates) {
-        if (!candidate.title?.trim() || candidate.confidence < 0.45) continue;
-        const todo = createTodo(candidate, trimmed);
-        await store.addTodo(todo, true);
-        extractedTodos.push(todo);
-        const reminder = createReminder(todo);
-        if (reminder) {
-          await store.addReminder(reminder);
-          reminders.push(reminder);
-        }
-      }
-      await refreshReminderTimers();
+      const saved = await saveTodoCandidates(modelResult.todoCandidates, trimmed, true);
+      extractedTodos = saved.todos;
+      reminders = saved.reminders;
     }
 
     broadcastSnapshotUpdated(_event.sender);
@@ -508,11 +753,17 @@ function registerIpc() {
       assistantMessage,
       extractedTodos,
       reminders,
-      mood: modelResult.mood
+      mood: modelResult.mood,
+      planProposal: modelResult.planProposal
     };
   });
 
   ipcMain.handle("todo:list", () => store.listTodos());
+  ipcMain.handle("todo:acceptPlanProposal", async (_event, items: TodoCandidate[], sourceMessage: string) => {
+    const saved = await saveTodoCandidates(items, sourceMessage, true);
+    broadcastSnapshotUpdated(_event.sender);
+    return saved;
+  });
   ipcMain.handle("todo:update", async (_event, id: string, patch: Partial<TodoItem>) => {
     const updated = await store.updateTodo(id, patch);
     if ("title" in patch || "remindAt" in patch) {
@@ -560,6 +811,7 @@ function registerIpc() {
     const next = await store.updateSettings(patch);
     mainWindow?.setAlwaysOnTop(next.alwaysOnTop);
     app.setLoginItemSettings({ openAtLogin: next.launchAtLogin });
+    if ("selectionToolsEnabled" in patch) await syncGlobalSelectionHook();
     broadcastSnapshotUpdated(_event.sender);
     return next;
   });
@@ -583,6 +835,51 @@ function registerIpc() {
       ...timeContext
     });
   });
+  ipcMain.handle("selection:process", async (_event, action: SelectionTextAction, text: string, targetLanguage = "auto"): Promise<SelectionTextResult> => {
+    if (action !== "summarize" && action !== "translate") throw new Error("Unsupported selection action");
+    const trimmed = text.trim();
+    if (!trimmed) throw new Error("Selected text is empty");
+    const result: SelectionTextResult = {
+      id: randomUUID(),
+      action,
+      title: action === "summarize" ? "Linnea 总结" : "Linnea 翻译",
+      markdown: "",
+      status: "pending",
+      targetLanguage: action === "translate" ? targetLanguage : undefined,
+      createdAt: new Date().toISOString()
+    };
+    selectionResults.set(result.id, result);
+    selectionResultSources.set(result.id, trimmed);
+    await openSelectionResultWindow(result);
+    void processSelectionResultInBackground(result, trimmed, action === "translate" ? targetLanguage : undefined);
+    return result;
+  });
+  ipcMain.handle("selection:retranslate", async (_event, id: string, targetLanguage: string): Promise<SelectionTextResult> => {
+    const current = selectionResults.get(id);
+    const source = selectionResultSources.get(id);
+    if (!current || current.action !== "translate") throw new Error("Translation result not found");
+    if (!source) throw new Error("Translation source text not found");
+    const pending: SelectionTextResult = {
+      ...current,
+      markdown: "",
+      status: "pending",
+      error: undefined,
+      targetLanguage,
+      updatedAt: new Date().toISOString()
+    };
+    selectionResults.set(id, pending);
+    void processSelectionResultInBackground(pending, source, targetLanguage);
+    return pending;
+  });
+  ipcMain.handle("selection:getResult", (_event, id: string) => selectionResults.get(id) ?? null);
+  ipcMain.handle("selection:getCapture", (_event, id: string) => selectionCaptures.get(id) ?? null);
+  ipcMain.handle("selection:createTodoFromCapture", async (_event, id: string) => {
+    const capture = selectionCaptures.get(id);
+    if (!capture) throw new Error("Selected text capture not found");
+    await openWorkspaceWindow();
+    workspaceWindow?.webContents.send("selection:todoText", capture.text);
+    selectionPopoverWindow?.close();
+  });
 }
 
 app.whenReady().then(async () => {
@@ -590,6 +887,7 @@ app.whenReady().then(async () => {
   await store.load();
   registerIpc();
   await createWindow();
+  await syncGlobalSelectionHook();
   try {
     createTray();
   } catch {
@@ -615,6 +913,7 @@ app.on("activate", () => {
 
 app.on("before-quit", () => {
   isQuitting = true;
+  unregisterGlobalSelectionHook();
 });
 
 app.on("window-all-closed", () => {
