@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, Notification, screen, shell, Tray, WebContents } from "electron";
+import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, nativeImage, Notification, screen, shell, Tray, WebContents } from "electron";
 import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { readdir } from "node:fs/promises";
@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { pathToFileURL } from "node:url";
 import { basename, dirname, extname, join } from "node:path";
 import { uIOhook, UiohookKey, type UiohookMouseEvent } from "uiohook-napi";
-import type { AppSettings, ChatResult, PetAppearance, ReminderItem, SelectionCapture, SelectionTextAction, SelectionTextResult, TodoCandidate, TodoItem } from "../../shared/types.js";
+import type { AppSettings, ChatResult, ConversationMessage, PetAppearance, ReminderItem, SelectionCapture, SelectionTextAction, SelectionTextResult, TodoCandidate, TodoItem } from "../../shared/types.js";
 import { askPetAssistant, processSelectedText, summarizeRecentContext, testAiConnection } from "./openaiClient.js";
 import { JsonStore } from "./storage.js";
 import type { OpenDialogOptions } from "electron";
@@ -35,8 +35,10 @@ const selectionCaptures = new Map<string, SelectionCapture>();
 const selectionResultSources = new Map<string, string>();
 const collapsedPetBounds = { width: 180, height: 300 };
 const expandedPetBounds = { width: 390, height: 560 };
+const workspacePreferredBounds = { width: 1680, height: 820, minWidth: 1600, minHeight: 700 };
 const selectionPopoverCollapsedBounds = { width: 38, height: 38 };
 const selectionPopoverExpandedBounds = { width: 252, height: 38 };
+let registeredQuickAiRecordShortcut: string | null = null;
 let windowDragState: { window: BrowserWindow; offsetX: number; offsetY: number } | null = null;
 let pendingPetExpanded: boolean | null = null;
 let globalSelectionHookStarted = false;
@@ -82,6 +84,24 @@ function getNotificationIconPath() {
 
 function getTrayIcon() {
   return nativeImage.createFromPath(getAppIconPath()).resize({ width: 16, height: 16 });
+}
+
+function getWorkspaceInitialBounds() {
+  const { workAreaSize } = screen.getPrimaryDisplay();
+  const minWidth = Math.min(workspacePreferredBounds.minWidth, workAreaSize.width);
+  const minHeight = Math.min(workspacePreferredBounds.minHeight, workAreaSize.height);
+  const width = Math.min(workspacePreferredBounds.width, Math.floor(workAreaSize.width * 0.94));
+  const height = Math.min(workspacePreferredBounds.height, Math.floor(workAreaSize.height * 0.92));
+  return {
+    width: Math.max(minWidth, width),
+    height: Math.max(minHeight, height),
+    minWidth,
+    minHeight
+  };
+}
+
+function normalizeAccelerator(value: string | undefined) {
+  return value?.trim().replace(/\s+/g, "") || "";
 }
 
 function ensureWindowsNotificationShortcut() {
@@ -186,6 +206,31 @@ function setPetWindowExpanded(expanded: boolean) {
   });
 }
 
+async function triggerQuickAiRecord() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (!mainWindow.isVisible()) mainWindow.show();
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.moveTop();
+  mainWindow.focus();
+  setPetWindowExpanded(true);
+  mainWindow.webContents.send("app:quickAiRecord");
+}
+
+async function registerQuickAiRecordShortcut() {
+  const settings = await store.getSettings();
+  const accelerator = normalizeAccelerator(settings.quickAiRecordShortcut);
+  if (registeredQuickAiRecordShortcut) {
+    globalShortcut.unregister(registeredQuickAiRecordShortcut);
+    registeredQuickAiRecordShortcut = null;
+  }
+  if (!accelerator) return;
+  const ok = globalShortcut.register(accelerator, () => {
+    void triggerQuickAiRecord();
+  });
+  registeredQuickAiRecordShortcut = ok ? accelerator : null;
+  if (!ok) console.warn(`Failed to register quick AI record shortcut: ${accelerator}`);
+}
+
 function beginWindowDrag(sender: WebContents) {
   const targetWindow = BrowserWindow.fromWebContents(sender) ?? mainWindow;
   if (!targetWindow) return;
@@ -227,11 +272,12 @@ async function openWorkspaceWindow(todoId?: string) {
     return;
   }
 
+  const initialBounds = getWorkspaceInitialBounds();
   workspaceWindow = new BrowserWindow({
-    width: 800,
-    height: 600,
-    minWidth: 420,
-    minHeight: 520,
+    width: initialBounds.width,
+    height: initialBounds.height,
+    minWidth: initialBounds.minWidth,
+    minHeight: initialBounds.minHeight,
     show: false,
     title: "Linnea 待办与对话",
     icon: getAppIconPath(),
@@ -356,7 +402,12 @@ async function openSelectionPopoverWindow(capture: SelectionCapture, x: number, 
     selectionPopoverWindow = null;
     selectionPopoverAnchor = null;
   });
-  await selectionPopoverWindow.loadURL(getRendererUrl("selection-popover") + `&id=${encodeURIComponent(capture.id)}`);
+  try {
+    await selectionPopoverWindow.loadURL(getRendererUrl("selection-popover") + `&id=${encodeURIComponent(capture.id)}`);
+  } catch (error) {
+    if (selectionPopoverWindow && !selectionPopoverWindow.isDestroyed()) selectionPopoverWindow.close();
+    console.warn("Failed to load selection popover window", error);
+  }
 }
 
 function getSelectionPopoverBounds(x: number, y: number, expanded: boolean) {
@@ -608,7 +659,7 @@ async function syncGlobalSelectionHook() {
 }
 
 function isPointInsideAppWindow(x: number, y: number) {
-  const ignoredWindows = [mainWindow, selectionPopoverWindow, ...selectionResultWindows].filter(
+  const ignoredWindows = [mainWindow, workspaceWindow, selectionPopoverWindow, ...selectionResultWindows].filter(
     (window): window is BrowserWindow => Boolean(window)
   );
   return ignoredWindows.some((window) => {
@@ -831,24 +882,39 @@ function getAiProviderLabel(provider: AppSettings["aiProvider"]) {
 function createTodo(candidate: {
   title: string;
   notes?: string | null;
+  project?: string | null;
+  tags?: string[];
+  priority?: TodoItem["priority"];
   dueAt?: string | null;
   remindAt?: string | null;
+  repeatRule?: string | null;
+  subtasks?: TodoItem["subtasks"];
+  attachments?: string[];
   confidence?: number;
 }, sourceMessage: string): TodoItem {
+  const now = new Date().toISOString();
   return {
     id: randomUUID(),
     title: candidate.title.trim().slice(0, 120),
     notes: candidate.notes ?? undefined,
+    project: normalizeOptionalText(candidate.project),
+    tags: normalizeTextArray(candidate.tags, 8),
+    priority: candidate.priority ?? "medium",
     sourceMessage,
     status: "open",
-    createdAt: new Date().toISOString(),
+    createdAt: now,
     dueAt: normalizeMaybeIso(candidate.dueAt),
     remindAt: normalizeMaybeIso(candidate.remindAt),
-    confidence: candidate.confidence
+    repeatRule: normalizeOptionalText(candidate.repeatRule),
+    subtasks: normalizeSubtasksForTodo(candidate.subtasks),
+    attachments: normalizeTextArray(candidate.attachments, 6),
+    confidence: candidate.confidence,
+    confirmedAt: now
   };
 }
 
 function createReminder(todo: TodoItem, message?: string): ReminderItem | null {
+  if (todo.status !== "open") return null;
   if (!todo.remindAt) return null;
   return {
     id: randomUUID(),
@@ -875,6 +941,49 @@ async function saveTodoCandidates(candidates: TodoCandidate[], sourceMessage: st
   }
   if (todos.length || reminders.length) await refreshReminderTimers();
   return { todos, reminders };
+}
+
+function buildTaskDraftProposal(modelResult: Awaited<ReturnType<typeof askPetAssistant>>, sourceMessage: string) {
+  if (modelResult.planProposal?.items.length) {
+    return {
+      ...modelResult.planProposal,
+      sourceMessage: modelResult.planProposal.sourceMessage || sourceMessage,
+      needsConfirmation: true
+    };
+  }
+  if (!modelResult.todoCandidates.length) return null;
+  return {
+    summary: modelResult.todoCandidates.length === 1 ? "待办草案" : `待办草案（${modelResult.todoCandidates.length} 项）`,
+    sourceMessage,
+    needsConfirmation: true,
+    items: modelResult.todoCandidates
+  };
+}
+
+function normalizeOptionalText(value: string | null | undefined) {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+function normalizeTextArray(value: string[] | undefined, limit: number) {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => item.trim()).filter(Boolean).slice(0, limit);
+}
+
+function normalizeSubtasksForTodo(value: TodoItem["subtasks"]) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => {
+      const title = item.title?.trim();
+      if (!title) return null;
+      return {
+        id: item.id || randomUUID(),
+        title: title.slice(0, 120),
+        done: item.done === true
+      };
+    })
+    .filter((item): item is NonNullable<typeof item> => Boolean(item))
+    .slice(0, 12);
 }
 
 async function selectPetAppearance(sender: WebContents): Promise<PetAppearance | null> {
@@ -987,42 +1096,57 @@ function registerIpc() {
       ...timeContext
     });
 
+    const taskDraftProposal = buildTaskDraftProposal(modelResult, trimmed);
     const assistantMessage = {
       id: randomUUID(),
       role: "assistant" as const,
       text: modelResult.replyText,
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      taskDraftProposal,
+      taskDraftStatus: taskDraftProposal ? "pending" as const : undefined
     };
     await store.addMessage(assistantMessage);
-
-    let extractedTodos: TodoItem[] = [];
-    let reminders: ReminderItem[] = [];
-    if (settings.autoSaveTodos) {
-      const saved = await saveTodoCandidates(modelResult.todoCandidates, trimmed, true);
-      extractedTodos = saved.todos;
-      reminders = saved.reminders;
-    }
 
     broadcastSnapshotUpdated(_event.sender);
 
     return {
       assistantMessage,
-      extractedTodos,
-      reminders,
+      extractedTodos: [],
+      reminders: [],
       mood: modelResult.mood,
-      planProposal: modelResult.planProposal
+      taskDraftProposal,
+      planProposal: taskDraftProposal
     };
   });
 
   ipcMain.handle("todo:list", () => store.listTodos());
-  ipcMain.handle("todo:acceptPlanProposal", async (_event, items: TodoCandidate[], sourceMessage: string) => {
+  ipcMain.handle("chat:updateTaskDraft", async (_event, messageId: string, patch: Partial<ConversationMessage>) => {
+    const updated = await store.updateMessage(messageId, {
+      taskDraftProposal: patch.taskDraftProposal,
+      taskDraftStatus: patch.taskDraftStatus
+    });
+    broadcastSnapshotUpdated(_event.sender);
+    return updated;
+  });
+  ipcMain.handle("todo:acceptPlanProposal", async (_event, items: TodoCandidate[], sourceMessage: string, messageId?: string) => {
     const saved = await saveTodoCandidates(items, sourceMessage, true);
+    if (messageId) {
+      await store.updateMessage(messageId, {
+        taskDraftProposal: {
+          summary: `已保存 ${saved.todos.length} 个待办`,
+          sourceMessage,
+          needsConfirmation: false,
+          items
+        },
+        taskDraftStatus: "accepted"
+      });
+    }
     broadcastSnapshotUpdated(_event.sender);
     return saved;
   });
   ipcMain.handle("todo:update", async (_event, id: string, patch: Partial<TodoItem>) => {
     const updated = await store.updateTodo(id, patch);
-    if ("title" in patch || "remindAt" in patch) {
+    if ("title" in patch || "remindAt" in patch || "status" in patch) {
       await store.replaceReminderForTodo(updated.id, createReminder(updated));
       await refreshReminderTimers();
     }
@@ -1068,6 +1192,7 @@ function registerIpc() {
     mainWindow?.setAlwaysOnTop(next.alwaysOnTop);
     app.setLoginItemSettings({ openAtLogin: next.launchAtLogin });
     if ("selectionToolsEnabled" in patch) await syncGlobalSelectionHook();
+    if ("quickAiRecordShortcut" in patch) await registerQuickAiRecordShortcut();
     broadcastSnapshotUpdated(_event.sender);
     return next;
   });
@@ -1160,6 +1285,7 @@ app.whenReady().then(async () => {
   registerIpc();
   await createWindow();
   await syncGlobalSelectionHook();
+  await registerQuickAiRecordShortcut();
   try {
     createTray();
   } catch {
@@ -1189,6 +1315,7 @@ app.on("activate", () => {
 app.on("before-quit", () => {
   isQuitting = true;
   unregisterGlobalSelectionHook();
+  globalShortcut.unregisterAll();
 });
 
 app.on("window-all-closed", () => {

@@ -1,17 +1,35 @@
 export type PetMood = "idle" | "talking" | "happy" | "thinking" | "reminder";
 
 export type TodoStatus = "open" | "done" | "dismissed";
+export type TodoPriority = "low" | "medium" | "high" | "urgent";
+
+export interface TodoSubtask {
+  id?: string;
+  title: string;
+  done?: boolean;
+}
 
 export interface TodoItem {
   id: string;
   title: string;
   notes?: string;
+  project?: string;
+  tags?: string[];
+  priority?: TodoPriority;
   sourceMessage?: string;
   status: TodoStatus;
   createdAt: string;
   dueAt?: string;
   remindAt?: string;
+  scheduledStartAt?: string;
+  scheduledEndAt?: string;
+  isAllDayScheduled?: boolean;
+  repeatRule?: string;
+  subtasks?: TodoSubtask[];
+  attachments?: string[];
   confidence?: number;
+  confirmedAt?: string;
+  completedAt?: string;
 }
 
 export interface ReminderItem {
@@ -30,6 +48,8 @@ export interface ConversationMessage {
   role: "user" | "assistant" | "system";
   text: string;
   createdAt: string;
+  taskDraftProposal?: PlanProposal | null;
+  taskDraftStatus?: "pending" | "accepted" | "dismissed";
 }
 
 export interface AppSettings {
@@ -46,6 +66,7 @@ export interface AppSettings {
   launchAtLogin: boolean;
   keepChatHistory: boolean;
   selectionToolsEnabled: boolean;
+  quickAiRecordShortcut: string;
   workspaceThemeColor: string;
   skippedUpdateVersion?: string;
   petAppearance?: PetAppearance;
@@ -60,8 +81,14 @@ export interface PetAppearance {
 export interface TodoCandidate {
   title: string;
   notes?: string;
+  project?: string;
+  tags?: string[];
+  priority?: TodoPriority;
   dueAt?: string;
   remindAt?: string;
+  repeatRule?: string;
+  subtasks?: TodoSubtask[];
+  attachments?: string[];
   confidence: number;
 }
 
@@ -87,6 +114,7 @@ export interface ChatResult {
   extractedTodos: TodoItem[];
   reminders: ReminderItem[];
   mood: PetMood;
+  taskDraftProposal?: PlanProposal | null;
   planProposal?: PlanProposal | null;
 }
 
@@ -121,15 +149,16 @@ export interface DesktopPetApi {
   chat: {
     sendMessage(text: string): Promise<ChatResult>;
     listMessages(): Promise<ConversationMessage[]>;
+    updateTaskDraft(messageId: string, patch: Pick<ConversationMessage, "taskDraftProposal" | "taskDraftStatus">): Promise<ConversationMessage>;
     clearMessages(): Promise<void>;
     testApi(apiKey?: string): Promise<{ ok: boolean; message: string }>;
   };
   todo: {
     list(): Promise<TodoItem[]>;
-    update(id: string, patch: Partial<Pick<TodoItem, "title" | "notes" | "status" | "dueAt" | "remindAt">>): Promise<TodoItem>;
+    update(id: string, patch: Partial<Pick<TodoItem, "title" | "notes" | "project" | "tags" | "priority" | "status" | "dueAt" | "remindAt" | "scheduledStartAt" | "scheduledEndAt" | "isAllDayScheduled" | "repeatRule" | "subtasks" | "attachments" | "completedAt">>): Promise<TodoItem>;
     delete(id: string): Promise<TodoItem>;
     undoLastAutoSave(): Promise<TodoItem | null>;
-    acceptPlanProposal(items: TodoCandidate[], sourceMessage: string): Promise<{ todos: TodoItem[]; reminders: ReminderItem[] }>;
+    acceptPlanProposal(items: TodoCandidate[], sourceMessage: string, messageId?: string): Promise<{ todos: TodoItem[]; reminders: ReminderItem[] }>;
   };
   reminder: {
     list(): Promise<ReminderItem[]>;
@@ -174,6 +203,7 @@ export interface DesktopPetApi {
     onSnapshotUpdated(callback: () => void): () => void;
     onTodoFocus(callback: (todoId: string) => void): () => void;
     onSelectedTextTodo(callback: (text: string) => void): () => void;
+    onQuickAiRecord(callback: () => void): () => void;
   };
 }
 

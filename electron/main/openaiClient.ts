@@ -1,5 +1,5 @@
 import OpenAI from "openai";
-import type { ModelStructuredResult, SelectionTextAction } from "../../shared/types.js";
+import type { ModelStructuredResult, SelectionTextAction, TodoPriority } from "../../shared/types.js";
 
 interface AiClientConfig {
   apiKey?: string;
@@ -9,7 +9,7 @@ interface AiClientConfig {
 }
 
 const fallbackResult = (text: string): ModelStructuredResult => ({
-  replyText: "我已经记下你说的内容了。现在还没有配置模型 API Key，所以先用本地规则帮你做基础记录。",
+  replyText: "我先整理成任务草案，确认后再保存。当前没有配置模型 API Key，所以只使用本地规则做基础抽取。",
   mood: "thinking",
   taskIntent: "simple_todo",
   todoCandidates: localTodoExtract(text)
@@ -35,7 +35,7 @@ export async function askPetAssistant(params: {
       {
         role: "system",
         content:
-          "你是 Windows 桌面宠物助手 Linnea。用简短、自然、亲近但不夸张的中文回复。你还要判断用户消息的任务意图并抽取待办。必须只输出 JSON，不要输出 Markdown。JSON 字段只能为 replyText, mood, taskIntent, todoCandidates, planProposal。mood 只能是 idle/talking/happy/thinking/reminder。taskIntent 只能是 none/simple_todo/complex_goal。none 表示闲聊、情绪表达或没有明确行动；simple_todo 表示单一步骤即可完成的事项，例如提醒、开会、买东西、打电话、提交材料；complex_goal 表示需要多个步骤或阶段推进的目标，例如写完论文、备考、准备汇报、完成项目、整理作品集。todoCandidates 只用于 simple_todo，每项必须包含 title, notes, dueAt, remindAt, confidence；没有值用 null。complex_goal 时不要把内容放入 todoCandidates，必须输出 planProposal：summary 是目标概述，sourceMessage 原样填写用户消息，needsConfirmation 为 true，items 为 3-6 个可执行步骤，每项包含 title, notes, dueAt, remindAt, confidence，并给出合理时间节点。用户说“提醒我 X”“N 分钟后提醒我 X”“明天提醒我 X”时属于 simple_todo，必须创建 todoCandidates 项：title 是要做的事，remindAt 是提醒时间，dueAt 通常同 remindAt，notes 可写提醒说明。所有相对日期和口语时间都必须基于用户消息发送时的本地时间解析。输出 dueAt/remindAt 时必须使用带时区偏移的 ISO 8601，例如 2026-05-04T20:00:00+08:00；不要输出无时区时间，也不要把本地晚上 8 点当作 UTC 20:00。"
+          "你是 Windows 桌面宠物助手 Linnea。用简短、自然、亲近但不夸张的中文回复。你还要判断用户消息的任务意图并抽取待办草案。必须只输出 JSON，不要输出 Markdown。JSON 字段只能为 replyText, mood, taskIntent, todoCandidates, planProposal。mood 只能是 idle/talking/happy/thinking/reminder。taskIntent 只能是 none/simple_todo/complex_goal。none 表示闲聊、情绪表达或没有明确行动；simple_todo 表示一个或多个可以直接列为待办的事项，例如提醒、开会、买东西、打电话、提交材料；complex_goal 表示需要多个步骤或阶段推进的目标，例如写完论文、备考、准备汇报、完成项目、整理作品集。todoCandidates 用于 simple_todo，每项必须包含 title, notes, project, tags, priority, dueAt, remindAt, repeatRule, subtasks, attachments, confidence；没有值用 null 或空数组。priority 只能是 low/medium/high/urgent，不确定用 medium。tags 是短标签数组；project 是所属项目；repeatRule 是自然语言重复规则，例如“每周五”，没有则 null；subtasks 是 {title, done} 数组；attachments 是附件名称或路径数组，用户没有明确提到则空数组。complex_goal 时不要把内容放入 todoCandidates，必须输出 planProposal：summary 是目标概述，sourceMessage 原样填写用户消息，needsConfirmation 为 true，items 为 3-6 个可执行步骤，每项字段同 todoCandidates，并给出合理时间节点。用户说“提醒我 X”“N 分钟后提醒我 X”“明天提醒我 X”时属于 simple_todo，必须创建 todoCandidates 项：title 是要做的事，remindAt 是提醒时间，dueAt 通常同 remindAt，notes 可写提醒说明。所有相对日期和口语时间都必须基于用户消息发送时的本地时间解析。输出 dueAt/remindAt 时必须使用带时区偏移的 ISO 8601，例如 2026-05-04T20:00:00+08:00；不要输出无时区时间，也不要把本地晚上 8 点当作 UTC 20:00。所有抽取结果只是草案，不能声称已经保存。"
       },
       {
         role: "user",
@@ -213,8 +213,14 @@ function localTodoExtract(text: string) {
     {
       title: normalized.replace(/^(提醒我|记一下|待办[:：]?)/, "").trim() || normalized,
       notes: "由本地规则自动记录。配置 DeepSeek API Key 后会启用更准确的抽取。",
+      project: undefined,
+      tags: [],
+      priority: "medium" as const,
       dueAt: undefined,
       remindAt: undefined,
+      repeatRule: undefined,
+      subtasks: [],
+      attachments: [],
       confidence: 0.55
     }
   ];
@@ -260,10 +266,43 @@ function normalizeTodoCandidates(value: unknown) {
       return {
         title,
         notes: typeof candidate.notes === "string" ? candidate.notes : undefined,
+        project: typeof candidate.project === "string" ? candidate.project.trim() || undefined : undefined,
+        tags: normalizeStringArray(candidate.tags, 8),
+        priority: normalizePriority(candidate.priority),
         dueAt: typeof candidate.dueAt === "string" ? candidate.dueAt : undefined,
         remindAt: typeof candidate.remindAt === "string" ? candidate.remindAt : undefined,
+        repeatRule: typeof candidate.repeatRule === "string" ? candidate.repeatRule.trim() || undefined : undefined,
+        subtasks: normalizeSubtasks(candidate.subtasks),
+        attachments: normalizeStringArray(candidate.attachments, 6),
         confidence
       };
     })
     .filter((item): item is NonNullable<typeof item> => Boolean(item));
+}
+
+function normalizePriority(value: unknown): TodoPriority {
+  return value === "low" || value === "high" || value === "urgent" ? value : "medium";
+}
+
+function normalizeStringArray(value: unknown, limit: number) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => (typeof item === "string" ? item.trim() : ""))
+    .filter(Boolean)
+    .slice(0, limit);
+}
+
+function normalizeSubtasks(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => {
+      if (typeof item === "string") return { title: item.trim(), done: false };
+      if (!item || typeof item !== "object") return null;
+      const subtask = item as Record<string, unknown>;
+      const title = typeof subtask.title === "string" ? subtask.title.trim() : "";
+      if (!title) return null;
+      return { title, done: subtask.done === true };
+    })
+    .filter((item): item is { title: string; done: boolean } => Boolean(item))
+    .slice(0, 12);
 }

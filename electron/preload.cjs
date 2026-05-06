@@ -4,6 +4,7 @@ const api = {
   chat: {
     sendMessage: (text) => ipcRenderer.invoke("chat:sendMessage", text),
     listMessages: () => ipcRenderer.invoke("chat:listMessages"),
+    updateTaskDraft: (messageId, patch) => ipcRenderer.invoke("chat:updateTaskDraft", messageId, patch),
     clearMessages: () => ipcRenderer.invoke("chat:clearMessages"),
     testApi: (apiKey) => ipcRenderer.invoke("chat:testApi", apiKey)
   },
@@ -12,7 +13,7 @@ const api = {
     update: (id, patch) => ipcRenderer.invoke("todo:update", id, patch),
     delete: (id) => ipcRenderer.invoke("todo:delete", id),
     undoLastAutoSave: () => ipcRenderer.invoke("todo:undoLastAutoSave"),
-    acceptPlanProposal: (items, sourceMessage) => ipcRenderer.invoke("todo:acceptPlanProposal", items, sourceMessage)
+    acceptPlanProposal: (items, sourceMessage, messageId) => ipcRenderer.invoke("todo:acceptPlanProposal", items, sourceMessage, messageId)
   },
   reminder: {
     list: () => ipcRenderer.invoke("reminder:list"),
@@ -75,6 +76,11 @@ const api = {
       const listener = (_event, text) => callback(text);
       ipcRenderer.on("selection:todoText", listener);
       return () => ipcRenderer.removeListener("selection:todoText", listener);
+    },
+    onQuickAiRecord: (callback) => {
+      const listener = () => callback();
+      ipcRenderer.on("app:quickAiRecord", listener);
+      return () => ipcRenderer.removeListener("app:quickAiRecord", listener);
     }
   }
 };

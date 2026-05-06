@@ -25,6 +25,7 @@ const defaultSettings: AppSettings = {
   launchAtLogin: false,
   keepChatHistory: true,
   selectionToolsEnabled: true,
+  quickAiRecordShortcut: "CommandOrControl+Shift+Space",
   workspaceThemeColor: "#5aa982",
   skippedUpdateVersion: undefined
 };
@@ -93,6 +94,15 @@ export class JsonStore {
 
   async listMessages(): Promise<ConversationMessage[]> {
     return (await this.load()).messages;
+  }
+
+  async updateMessage(id: string, patch: Partial<ConversationMessage>): Promise<ConversationMessage> {
+    const state = await this.load();
+    const index = state.messages.findIndex((message) => message.id === id);
+    if (index < 0) throw new Error("Message not found");
+    state.messages[index] = { ...state.messages[index], ...patch };
+    await this.save();
+    return state.messages[index];
   }
 
   async clearMessages(): Promise<void> {
@@ -193,6 +203,7 @@ function normalizeSettings(settings: AppSettings): AppSettings {
     openAiApiKey: aiApiKey,
     openAiModel: aiModel,
     selectionToolsEnabled: settings.selectionToolsEnabled !== false,
+    quickAiRecordShortcut: normalizeNonEmptyString(settings.quickAiRecordShortcut) ?? "CommandOrControl+Shift+Space",
     workspaceThemeColor: normalizeThemeColor(settings.workspaceThemeColor),
     skippedUpdateVersion: normalizeOptionalString(settings.skippedUpdateVersion),
     petAppearance: settings.petAppearance?.directory ? settings.petAppearance : undefined
