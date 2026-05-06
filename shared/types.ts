@@ -116,6 +116,7 @@ export interface DesktopPetApi {
     sendMessage(text: string): Promise<ChatResult>;
     listMessages(): Promise<ConversationMessage[]>;
     clearMessages(): Promise<void>;
+    testApi(apiKey?: string): Promise<{ ok: boolean; message: string }>;
   };
   todo: {
     list(): Promise<TodoItem[]>;
@@ -147,14 +148,15 @@ export interface DesktopPetApi {
     retranslate(id: string, targetLanguage: string): Promise<SelectionTextResult>;
     getResult(id: string): Promise<SelectionTextResult | null>;
     getCapture(id: string): Promise<SelectionCapture | null>;
+    resizePopover(expanded: boolean): Promise<void>;
     createTodoFromCapture(id: string): Promise<void>;
   };
   app: {
     snapshot(): Promise<AppSnapshot>;
     setIgnoreMouseEvents(ignore: boolean): Promise<void>;
     moveWindowBy(deltaX: number, deltaY: number): Promise<void>;
-    beginWindowDrag(offsetX: number, offsetY: number): Promise<void>;
-    dragWindowToCursor(screenX: number, screenY: number): Promise<void>;
+    beginWindowDrag(): Promise<void>;
+    dragWindowToCursor(): Promise<void>;
     endWindowDrag(): Promise<void>;
     setPetWindowExpanded(expanded: boolean): Promise<void>;
     openWorkspaceWindow(todoId?: string): Promise<void>;

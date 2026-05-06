@@ -114,6 +114,34 @@ export async function summarizeRecentContext(params: {
   return response.choices[0]?.message?.content?.trim() || "暂时没有足够内容可以总结。";
 }
 
+export async function testDeepSeekApi(params: {
+  apiKey?: string;
+  model: string;
+}): Promise<string> {
+  if (!params.apiKey?.trim()) {
+    throw new Error("请先填写 DeepSeek API Key，或配置 DEEPSEEK_API_KEY 环境变量。");
+  }
+
+  const client = new OpenAI({
+    apiKey: params.apiKey,
+    baseURL: "https://api.deepseek.com"
+  });
+
+  const response = await client.chat.completions.create({
+    model: params.model,
+    messages: [
+      { role: "system", content: "你是 API 连通性测试模块。请回复 OK。" },
+      { role: "user", content: "请回复 OK" }
+    ],
+    max_tokens: 16,
+    temperature: 0
+  });
+
+  const text = response.choices[0]?.message?.content?.trim();
+  if (!Array.isArray(response.choices)) throw new Error("DeepSeek 返回结构异常。");
+  return text || "OK";
+}
+
 export async function processSelectedText(params: {
   apiKey?: string;
   model: string;

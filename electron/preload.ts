@@ -5,7 +5,8 @@ const api: DesktopPetApi = {
   chat: {
     sendMessage: (text) => ipcRenderer.invoke("chat:sendMessage", text),
     listMessages: () => ipcRenderer.invoke("chat:listMessages"),
-    clearMessages: () => ipcRenderer.invoke("chat:clearMessages")
+    clearMessages: () => ipcRenderer.invoke("chat:clearMessages"),
+    testApi: (apiKey) => ipcRenderer.invoke("chat:testApi", apiKey)
   },
   todo: {
     list: () => ipcRenderer.invoke("todo:list"),
@@ -37,15 +38,16 @@ const api: DesktopPetApi = {
     retranslate: (id, targetLanguage) => ipcRenderer.invoke("selection:retranslate", id, targetLanguage),
     getResult: (id) => ipcRenderer.invoke("selection:getResult", id),
     getCapture: (id) => ipcRenderer.invoke("selection:getCapture", id),
+    resizePopover: (expanded) => ipcRenderer.invoke("selection:resizePopover", expanded),
     createTodoFromCapture: (id) => ipcRenderer.invoke("selection:createTodoFromCapture", id)
   },
   app: {
     snapshot: () => ipcRenderer.invoke("app:snapshot"),
     setIgnoreMouseEvents: (ignore) => ipcRenderer.invoke("app:setIgnoreMouseEvents", ignore),
     moveWindowBy: (deltaX, deltaY) => ipcRenderer.invoke("app:moveWindowBy", deltaX, deltaY),
-    beginWindowDrag: (offsetX, offsetY) => ipcRenderer.invoke("app:beginWindowDrag", offsetX, offsetY),
-    dragWindowToCursor: (screenX, screenY) => {
-      ipcRenderer.send("app:dragWindowToCursor", screenX, screenY);
+    beginWindowDrag: () => ipcRenderer.invoke("app:beginWindowDrag"),
+    dragWindowToCursor: () => {
+      ipcRenderer.send("app:dragWindowToCursor");
       return Promise.resolve();
     },
     endWindowDrag: () => ipcRenderer.invoke("app:endWindowDrag"),

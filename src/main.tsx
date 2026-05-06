@@ -1,6 +1,6 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
-import { AlertTriangle, BarChart3, Bell, CalendarDays, Check, FolderOpen, Image as ImageIcon, KeyRound, ListTodo, MessageCircle, Pencil, RotateCcw, Save, Settings, Send, Sparkles, Trash2, X } from "lucide-react";
+import { AlertTriangle, BarChart3, Bell, CalendarDays, Check, FileText, FolderOpen, Image as ImageIcon, KeyRound, Languages, ListTodo, MessageCircle, Pencil, RotateCcw, Save, Settings, Send, Sparkles, Trash2, X } from "lucide-react";
 import type { AppSettings, ConversationMessage, DesktopPetApi, PetMood, PlanProposal, ReminderItem, SelectionCapture, SelectionTextResult, TodoItem } from "../shared/types";
 import confusedImage from "./assets/pet/linnea_state/_Confused_.png";
 import draggingImage from "./assets/pet/linnea_state/_Dragging_.png";
@@ -144,10 +144,10 @@ function App() {
   }, [api, refreshSnapshot]);
 
   React.useEffect(() => {
-    if (isWorkspaceWindow || !chatOpen || input.trim() || busy || activeReminder) return;
+    if (isWorkspaceWindow || dragging || !chatOpen || input.trim() || busy || activeReminder) return;
     const timer = window.setTimeout(() => setChatOpen(false), 5000);
     return () => window.clearTimeout(timer);
-  }, [activeReminder, busy, chatOpen, input, isWorkspaceWindow]);
+  }, [activeReminder, busy, chatOpen, dragging, input, isWorkspaceWindow]);
 
   React.useEffect(() => {
     if (!api || !isWorkspaceWindow) return;
@@ -157,9 +157,9 @@ function App() {
   }, [api, isWorkspaceWindow]);
 
   React.useEffect(() => {
-    if (isWorkspaceWindow || !api) return;
+    if (isWorkspaceWindow || !api || dragging) return;
     void api.app.setPetWindowExpanded(chatOpen);
-  }, [api, chatOpen, isWorkspaceWindow]);
+  }, [api, chatOpen, dragging, isWorkspaceWindow]);
 
   React.useEffect(() => {
     return () => {
@@ -311,7 +311,7 @@ function App() {
     setBubble("好的，这个计划先不写入。");
   }
 
-  function updateSelectionPopover() {
+  function updateSelectionPopover(mousePosition?: { x: number; y: number }) {
     if (!isWorkspaceWindow) return;
     window.setTimeout(() => {
       const selection = window.getSelection();
@@ -326,10 +326,14 @@ function App() {
         setSelectionPopover(null);
         return;
       }
+      const fallbackX = rect.left + rect.width / 2;
+      const fallbackY = rect.bottom;
+      const anchorX = mousePosition?.x ?? fallbackX;
+      const anchorY = mousePosition?.y ?? fallbackY;
       setSelectionPopover({
         text: text.slice(0, 4000),
-        x: Math.min(window.innerWidth - 220, Math.max(12, rect.left + rect.width / 2 - 110)),
-        y: Math.min(window.innerHeight - 54, Math.max(12, rect.top - 46))
+        x: Math.min(window.innerWidth - 42, Math.max(8, anchorX + 8)),
+        y: Math.min(window.innerHeight - 42, Math.max(8, anchorY + 8))
       });
     }, 0);
   }
@@ -423,7 +427,7 @@ function App() {
     event.currentTarget.setPointerCapture(event.pointerId);
     pointerStartRef.current = { screenX: event.screenX, screenY: event.screenY };
     didDragRef.current = false;
-    void api?.app.beginWindowDrag(event.clientX, event.clientY);
+    void api?.app.beginWindowDrag();
   }
 
   function handlePetPointerMove(event: React.PointerEvent<HTMLButtonElement>) {
@@ -433,7 +437,7 @@ function App() {
     if (!didDragRef.current && totalDx < 5 && totalDy < 5) return;
     didDragRef.current = true;
     setDragging(true);
-    void api.app.dragWindowToCursor(event.screenX, event.screenY);
+    void api.app.dragWindowToCursor();
   }
 
   function handlePetPointerUp(event: React.PointerEvent<HTMLButtonElement>) {
@@ -626,7 +630,7 @@ function WorkspaceWindow({
   onUndoAutoSave(): void;
   onAcceptPlan(): void;
   onDismissPlan(): void;
-  onSelectionUpdate(): void;
+  onSelectionUpdate(mousePosition?: { x: number; y: number }): void;
   onSelectionAction(action: SelectionAction, text: string): void;
   onSelectionClose(): void;
   onUpdateSettings(patch: Partial<AppSettings>): void;
@@ -640,6 +644,7 @@ function WorkspaceWindow({
   const [summaryText, setSummaryText] = React.useState("");
   const [summaryBusy, setSummaryBusy] = React.useState(false);
   const [summaryError, setSummaryError] = React.useState("");
+  const messagesEndRef = React.useRef<HTMLDivElement | null>(null);
   const themeStyle = React.useMemo(
     () => createWorkspaceThemeStyle(settings?.workspaceThemeColor),
     [settings?.workspaceThemeColor]
@@ -648,6 +653,11 @@ function WorkspaceWindow({
   React.useEffect(() => {
     if (focusedTodoId) setActiveTab("workspace");
   }, [focusedTodoId]);
+
+  React.useEffect(() => {
+    if (activeTab !== "workspace") return;
+    messagesEndRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
+  }, [activeTab, messages.length, pendingPlan, thinkingPlaceholder?.id]);
 
   async function generateSummary() {
     if (!api || summaryBusy) return;
@@ -663,7 +673,12 @@ function WorkspaceWindow({
   }
 
   return (
-    <main className="workspace-shell" style={themeStyle} onMouseUp={onSelectionUpdate} onKeyUp={onSelectionUpdate}>
+    <main
+      className="workspace-shell"
+      style={themeStyle}
+      onMouseUp={(event) => onSelectionUpdate({ x: event.clientX, y: event.clientY })}
+      onKeyUp={() => onSelectionUpdate()}
+    >
       {selectionPopover && (
         <SelectionPopover
           selection={selectionPopover}
@@ -740,6 +755,7 @@ function WorkspaceWindow({
                     onDismiss={onDismissPlan}
                   />
                 )}
+                <div ref={messagesEndRef} aria-hidden="true" />
               </div>
               <form className="workspace-composer" onSubmit={onSendMessage}>
                 <input
@@ -780,6 +796,7 @@ function WorkspaceWindow({
                 onSelectPetAppearance={onSelectPetAppearance}
                 onResetPetAppearance={onResetPetAppearance}
                 onTestReminder={onTestReminder}
+                api={api}
               />
             ) : (
               <div className="empty">设置加载中。</div>
@@ -877,18 +894,23 @@ function SelectionPopover({
       style={{ left: selection.x, top: selection.y }}
       onMouseDown={(event) => event.preventDefault()}
     >
-      <button type="button" disabled={busy} onClick={() => onAction("summarize", selection.text)}>
-        总结
-      </button>
-      <button type="button" disabled={busy} onClick={() => onAction("translate", selection.text)}>
-        翻译
-      </button>
-      <button type="button" disabled={busy} onClick={() => onAction("todo", selection.text)}>
-        生成待办
-      </button>
-      <button type="button" disabled={busy} aria-label="关闭选中文本操作" onClick={onClose}>
-        <X size={13} />
-      </button>
+      <span className="selection-popover-dot" aria-hidden="true">
+        <Sparkles size={16} />
+      </span>
+      <div className="selection-toolbar" aria-label="选中文字操作">
+        <button type="button" title="总结" disabled={busy} onClick={() => onAction("summarize", selection.text)}>
+          <FileText size={14} /> 总结
+        </button>
+        <button type="button" title="翻译" disabled={busy} onClick={() => onAction("translate", selection.text)}>
+          <Languages size={14} /> 翻译
+        </button>
+        <button type="button" title="生成待办" disabled={busy} onClick={() => onAction("todo", selection.text)}>
+          <ListTodo size={14} /> 待办
+        </button>
+        <button type="button" title="关闭" disabled={busy} aria-label="关闭选中文本操作" onClick={onClose}>
+          <X size={14} />
+        </button>
+      </div>
     </section>
   );
 }
@@ -1047,6 +1069,12 @@ function GlobalSelectionPopoverWindow({
     return () => window.clearTimeout(timer);
   }, [busyAction]);
 
+  React.useEffect(() => {
+    return () => {
+      void api?.selection.resizePopover(false);
+    };
+  }, [api]);
+
   async function runAction(action: SelectionAction) {
     if (!api || !capture || busyAction) return;
     setBusyAction(action);
@@ -1065,23 +1093,39 @@ function GlobalSelectionPopoverWindow({
   }
 
   return (
-    <main className="global-selection-popover-shell" style={themeStyle}>
+    <main
+      className="global-selection-popover-shell"
+      style={themeStyle}
+      onMouseEnter={() => void api?.selection.resizePopover(true)}
+      onMouseLeave={() => void api?.selection.resizePopover(false)}
+      onFocus={() => void api?.selection.resizePopover(true)}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+          void api?.selection.resizePopover(false);
+        }
+      }}
+    >
       {error ? (
         <div className="global-selection-error">{error}</div>
       ) : (
         <>
-          <button type="button" disabled={!capture || Boolean(busyAction)} onClick={() => void runAction("summarize")}>
-            {busyAction === "summarize" ? "总结中..." : "总结"}
-          </button>
-          <button type="button" disabled={!capture || Boolean(busyAction)} onClick={() => void runAction("translate")}>
-            {busyAction === "translate" ? "翻译中..." : "翻译"}
-          </button>
-          <button type="button" disabled={!capture || Boolean(busyAction)} onClick={() => void runAction("todo")}>
-            {busyAction === "todo" ? "整理中..." : "生成待办"}
-          </button>
-          <button type="button" aria-label="关闭" onClick={() => window.close()}>
-            <X size={13} />
-          </button>
+          <span className="selection-popover-dot" aria-hidden="true">
+            <Sparkles size={16} />
+          </span>
+          <div className="selection-toolbar" aria-label="选中文字操作">
+            <button type="button" title="总结" disabled={!capture || Boolean(busyAction)} onClick={() => void runAction("summarize")}>
+              <FileText size={14} /> {busyAction === "summarize" ? "总结中..." : "总结"}
+            </button>
+            <button type="button" title="翻译" disabled={!capture || Boolean(busyAction)} onClick={() => void runAction("translate")}>
+              <Languages size={14} /> {busyAction === "translate" ? "翻译中..." : "翻译"}
+            </button>
+            <button type="button" title="生成待办" disabled={!capture || Boolean(busyAction)} onClick={() => void runAction("todo")}>
+              <ListTodo size={14} /> {busyAction === "todo" ? "整理中..." : "待办"}
+            </button>
+            <button type="button" title="关闭" aria-label="关闭" onClick={() => window.close()}>
+              <X size={14} />
+            </button>
+          </div>
         </>
       )}
     </main>
@@ -1621,7 +1665,8 @@ function SettingsPanel({
   onClearMessages,
   onSelectPetAppearance,
   onResetPetAppearance,
-  onTestReminder
+  onTestReminder,
+  api
 }: {
   settings: AppSettings;
   onChange(patch: Partial<AppSettings>): void;
@@ -1629,9 +1674,12 @@ function SettingsPanel({
   onSelectPetAppearance(): void;
   onResetPetAppearance(): void;
   onTestReminder(): Promise<void>;
+  api?: DesktopPetApi;
 }) {
   const [apiKey, setApiKey] = React.useState(settings.openAiApiKey ?? "");
   const [themeColor, setThemeColor] = React.useState(settings.workspaceThemeColor);
+  const [apiTestBusy, setApiTestBusy] = React.useState(false);
+  const [apiTestResult, setApiTestResult] = React.useState<{ ok: boolean; message: string } | null>(null);
 
   React.useEffect(() => {
     setThemeColor(settings.workspaceThemeColor);
@@ -1644,12 +1692,37 @@ function SettingsPanel({
     }
   }
 
+  async function testApi() {
+    if (!api || apiTestBusy) return;
+    setApiTestBusy(true);
+    setApiTestResult(null);
+    try {
+      const result = await api.chat.testApi(apiKey || undefined);
+      setApiTestResult(result);
+    } catch (error) {
+      setApiTestResult({
+        ok: false,
+        message: error instanceof Error ? error.message : "API 测试失败。"
+      });
+    } finally {
+      setApiTestBusy(false);
+    }
+  }
+
   return (
     <section className="settings">
       <label>
         <KeyRound size={14} /> DeepSeek API Key
         <input value={apiKey} onChange={(event) => setApiKey(event.target.value)} onBlur={() => onChange({ openAiApiKey: apiKey || undefined })} placeholder="也可使用系统环境变量 DEEPSEEK_API_KEY" />
       </label>
+      <button className="test-api-button" onClick={() => void testApi()} disabled={apiTestBusy}>
+        <Sparkles size={15} /> {apiTestBusy ? "测试中..." : "测试 API"}
+      </button>
+      {apiTestResult && (
+        <div className={`api-test-result ${apiTestResult.ok ? "ok" : "error"}`}>
+          {apiTestResult.message}
+        </div>
+      )}
       <section className="theme-setting" aria-label="双击页面主题颜色">
         <div className="setting-label">双击页面主题颜色</div>
         <div className="theme-swatches">

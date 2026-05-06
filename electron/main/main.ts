@@ -7,7 +7,7 @@ import { pathToFileURL } from "node:url";
 import { basename, dirname, extname, join } from "node:path";
 import { uIOhook, UiohookKey, type UiohookMouseEvent } from "uiohook-napi";
 import type { AppSettings, ChatResult, PetAppearance, ReminderItem, SelectionCapture, SelectionTextAction, SelectionTextResult, TodoCandidate, TodoItem } from "../../shared/types.js";
-import { askPetAssistant, processSelectedText, summarizeRecentContext } from "./openaiClient.js";
+import { askPetAssistant, processSelectedText, summarizeRecentContext, testDeepSeekApi } from "./openaiClient.js";
 import { JsonStore } from "./storage.js";
 import type { OpenDialogOptions } from "electron";
 
@@ -23,6 +23,7 @@ if (process.platform === "win32") {
 let mainWindow: BrowserWindow | null = null;
 let workspaceWindow: BrowserWindow | null = null;
 let selectionPopoverWindow: BrowserWindow | null = null;
+const selectionResultWindows = new Set<BrowserWindow>();
 let tray: Tray | null = null;
 let isQuitting = false;
 const reminderTimers = new Map<string, NodeJS.Timeout>();
@@ -31,10 +32,14 @@ const selectionCaptures = new Map<string, SelectionCapture>();
 const selectionResultSources = new Map<string, string>();
 const collapsedPetBounds = { width: 180, height: 300 };
 const expandedPetBounds = { width: 390, height: 560 };
+const selectionPopoverCollapsedBounds = { width: 38, height: 38 };
+const selectionPopoverExpandedBounds = { width: 252, height: 38 };
 let windowDragState: { window: BrowserWindow; offsetX: number; offsetY: number } | null = null;
+let pendingPetExpanded: boolean | null = null;
 let globalSelectionHookStarted = false;
 let globalMouseDown: { x: number; y: number; time: number; insideAppWindow: boolean } | null = null;
 let globalSelectionCaptureInFlight = false;
+let selectionPopoverAnchor: { x: number; y: number } | null = null;
 type ClipboardSnapshot = ReturnType<typeof readClipboardSnapshot>;
 const petStateNames = ["Idle", "Talking", "Happy", "Thinking", "Reminder", "Confused", "Dragging", "Urgent", "Rest", "Sleepy"] as const;
 const supportedPetImageExtensions = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif", ".avif"]);
@@ -142,6 +147,10 @@ async function createWindow() {
 
 function setPetWindowExpanded(expanded: boolean) {
   if (!mainWindow || (!app.isPackaged && process.env.DESKTOP_PET_TRANSPARENT !== "1")) return;
+  if (windowDragState?.window === mainWindow) {
+    pendingPetExpanded = expanded;
+    return;
+  }
   const target = expanded ? expandedPetBounds : collapsedPetBounds;
   const bounds = mainWindow.getBounds();
   if (bounds.width === target.width && bounds.height === target.height) return;
@@ -164,30 +173,40 @@ function setPetWindowExpanded(expanded: boolean) {
   });
 }
 
-function beginWindowDrag(sender: WebContents, offsetX: number, offsetY: number) {
+function beginWindowDrag(sender: WebContents) {
   const targetWindow = BrowserWindow.fromWebContents(sender) ?? mainWindow;
   if (!targetWindow) return;
+  const cursor = screen.getCursorScreenPoint();
+  const bounds = targetWindow.getBounds();
   windowDragState = {
     window: targetWindow,
-    offsetX,
-    offsetY
+    offsetX: cursor.x - bounds.x,
+    offsetY: cursor.y - bounds.y
   };
 }
 
-function dragWindowToCursor(screenX: number, screenY: number) {
+function dragWindowToCursor() {
   if (!windowDragState || windowDragState.window.isDestroyed()) return;
-  windowDragState.window.setPosition(
-    Math.round(screenX - windowDragState.offsetX),
-    Math.round(screenY - windowDragState.offsetY),
-    false
-  );
+  const cursor = screen.getCursorScreenPoint();
+  const nextX = Math.round(cursor.x - windowDragState.offsetX);
+  const nextY = Math.round(cursor.y - windowDragState.offsetY);
+  const [currentX, currentY] = windowDragState.window.getPosition();
+  if (currentX === nextX && currentY === nextY) return;
+  windowDragState.window.setPosition(nextX, nextY, false);
 }
 
 function endWindowDrag() {
+  const wasDraggingMainWindow = windowDragState?.window === mainWindow;
   windowDragState = null;
+  if (wasDraggingMainWindow && pendingPetExpanded !== null) {
+    const expanded = pendingPetExpanded;
+    pendingPetExpanded = null;
+    setPetWindowExpanded(expanded);
+  }
 }
 
 async function openWorkspaceWindow(todoId?: string) {
+  void syncGlobalSelectionHook();
   if (workspaceWindow && !workspaceWindow.isDestroyed()) {
     workspaceWindow.show();
     workspaceWindow.focus();
@@ -247,6 +266,10 @@ async function openSelectionResultWindow(result: SelectionTextResult) {
   });
 
   resultWindow.setMenuBarVisibility(false);
+  selectionResultWindows.add(resultWindow);
+  resultWindow.on("closed", () => {
+    selectionResultWindows.delete(resultWindow);
+  });
   resultWindow.once("ready-to-show", () => {
     resultWindow.show();
     resultWindow.focus();
@@ -287,26 +310,19 @@ async function openSelectionPopoverWindow(capture: SelectionCapture, x: number, 
   if (selectionPopoverWindow && !selectionPopoverWindow.isDestroyed()) {
     selectionPopoverWindow.close();
   }
-  const display = screen.getDisplayNearestPoint({ x, y });
-  const width = 252;
-  const height = 48;
-  const bounds = display.workArea;
-  const preferredX = x + 14;
-  const preferredY = y + 14;
-  const fallbackX = x - width - 14;
-  const fallbackY = y - height - 14;
-  const targetX = preferredX + width <= bounds.x + bounds.width - 8 ? preferredX : fallbackX;
-  const targetY = preferredY + height <= bounds.y + bounds.height - 8 ? preferredY : fallbackY;
+  selectionPopoverAnchor = { x, y };
+  const windowBounds = getSelectionPopoverBounds(x, y, false);
 
   selectionPopoverWindow = new BrowserWindow({
-    width,
-    height,
-    x: Math.round(Math.min(bounds.x + bounds.width - width - 8, Math.max(bounds.x + 8, targetX))),
-    y: Math.round(Math.min(bounds.y + bounds.height - height - 8, Math.max(bounds.y + 8, targetY))),
+    width: windowBounds.width,
+    height: windowBounds.height,
+    x: windowBounds.x,
+    y: windowBounds.y,
     show: false,
     frame: false,
     transparent: true,
     resizable: false,
+    hasShadow: false,
     alwaysOnTop: true,
     skipTaskbar: true,
     focusable: true,
@@ -326,8 +342,36 @@ async function openSelectionPopoverWindow(capture: SelectionCapture, x: number, 
   });
   selectionPopoverWindow.on("closed", () => {
     selectionPopoverWindow = null;
+    selectionPopoverAnchor = null;
   });
   await selectionPopoverWindow.loadURL(getRendererUrl("selection-popover") + `&id=${encodeURIComponent(capture.id)}`);
+}
+
+function getSelectionPopoverBounds(x: number, y: number, expanded: boolean) {
+  const display = screen.getDisplayNearestPoint({ x, y });
+  const size = expanded ? selectionPopoverExpandedBounds : selectionPopoverCollapsedBounds;
+  const bounds = display.workArea;
+  const margin = 6;
+  const offset = 8;
+  const preferredX = x + offset;
+  const preferredY = y + offset;
+  const targetX = preferredX + size.width <= bounds.x + bounds.width - margin
+    ? preferredX
+    : x - size.width - offset;
+  const targetY = preferredY + size.height <= bounds.y + bounds.height - margin
+    ? preferredY
+    : y - size.height - offset;
+  return {
+    width: size.width,
+    height: size.height,
+    x: Math.round(Math.min(bounds.x + bounds.width - size.width - margin, Math.max(bounds.x + margin, targetX))),
+    y: Math.round(Math.min(bounds.y + bounds.height - size.height - margin, Math.max(bounds.y + margin, targetY)))
+  };
+}
+
+function resizeSelectionPopoverWindow(expanded: boolean) {
+  if (!selectionPopoverWindow || selectionPopoverWindow.isDestroyed() || !selectionPopoverAnchor) return;
+  selectionPopoverWindow.setBounds(getSelectionPopoverBounds(selectionPopoverAnchor.x, selectionPopoverAnchor.y, expanded), false);
 }
 
 async function openReminderTarget(reminder: ReminderItem) {
@@ -371,17 +415,19 @@ function registerGlobalSelectionHook() {
   if (process.platform !== "win32" || globalSelectionHookStarted) return;
   try {
     uIOhook.on("mousedown", (event: UiohookMouseEvent) => {
-      globalMouseDown = { x: event.x, y: event.y, time: Date.now(), insideAppWindow: isPointInsideAppWindow(event.x, event.y) };
+      const point = normalizeGlobalMousePoint(event.x, event.y);
+      globalMouseDown = { x: point.x, y: point.y, time: Date.now(), insideAppWindow: isPointInsideAppWindow(point.x, point.y) };
     });
     uIOhook.on("mouseup", (event: UiohookMouseEvent) => {
+      const point = normalizeGlobalMousePoint(event.x, event.y);
       const start = globalMouseDown;
       globalMouseDown = null;
       if (!start) return;
       if (start.insideAppWindow) return;
-      const distance = Math.hypot(event.x - start.x, event.y - start.y);
+      const distance = Math.hypot(point.x - start.x, point.y - start.y);
       const duration = Date.now() - start.time;
       if (distance < 10 || duration < 120) return;
-      void captureGlobalSelectedText(event.x, event.y);
+      void captureGlobalSelectedText(point.x, point.y);
     });
     uIOhook.start();
     globalSelectionHookStarted = true;
@@ -414,11 +460,38 @@ async function syncGlobalSelectionHook() {
 }
 
 function isPointInsideAppWindow(x: number, y: number) {
-  return BrowserWindow.getAllWindows().some((window) => {
+  const ignoredWindows = [mainWindow, workspaceWindow, selectionPopoverWindow, ...selectionResultWindows].filter(
+    (window): window is BrowserWindow => Boolean(window)
+  );
+  return ignoredWindows.some((window) => {
     if (window.isDestroyed() || !window.isVisible()) return false;
     const bounds = window.getBounds();
     return x >= bounds.x && x <= bounds.x + bounds.width && y >= bounds.y && y <= bounds.y + bounds.height;
   });
+}
+
+function normalizeGlobalMousePoint(x: number, y: number) {
+  for (const display of screen.getAllDisplays()) {
+    const scaleFactor = display.scaleFactor || 1;
+    const physicalBounds = {
+      x: display.bounds.x * scaleFactor,
+      y: display.bounds.y * scaleFactor,
+      width: display.bounds.width * scaleFactor,
+      height: display.bounds.height * scaleFactor
+    };
+    if (
+      x >= physicalBounds.x &&
+      x <= physicalBounds.x + physicalBounds.width &&
+      y >= physicalBounds.y &&
+      y <= physicalBounds.y + physicalBounds.height
+    ) {
+      return {
+        x: Math.round(display.bounds.x + (x - physicalBounds.x) / scaleFactor),
+        y: Math.round(display.bounds.y + (y - physicalBounds.y) / scaleFactor)
+      };
+    }
+  }
+  return { x, y };
 }
 
 async function captureGlobalSelectedText(x: number, y: number) {
@@ -429,11 +502,11 @@ async function captureGlobalSelectedText(x: number, y: number) {
   const marker = `__LINNEA_SELECTION_${randomUUID()}__`;
   clipboard.writeText(marker);
   try {
-    await delay(140);
+    await delay(workspaceWindow && !workspaceWindow.isDestroyed() && workspaceWindow.isVisible() ? 240 : 140);
     copySelectedTextToClipboard();
     let selectedText = await waitForClipboardTextChange(marker, 900);
     if (!selectedText) {
-      await delay(120);
+      await delay(180);
       copySelectedTextToClipboard();
       selectedText = await waitForClipboardTextChange(marker, 900);
     }
@@ -690,11 +763,11 @@ function registerIpc() {
     const [x, y] = targetWindow.getPosition();
     targetWindow.setPosition(Math.round(x + deltaX), Math.round(y + deltaY));
   });
-  ipcMain.handle("app:beginWindowDrag", (_event, offsetX: number, offsetY: number) => {
-    beginWindowDrag(_event.sender, offsetX, offsetY);
+  ipcMain.handle("app:beginWindowDrag", (_event) => {
+    beginWindowDrag(_event.sender);
   });
-  ipcMain.on("app:dragWindowToCursor", (_event, screenX: number, screenY: number) => {
-    dragWindowToCursor(screenX, screenY);
+  ipcMain.on("app:dragWindowToCursor", () => {
+    dragWindowToCursor();
   });
   ipcMain.handle("app:endWindowDrag", () => {
     endWindowDrag();
@@ -708,6 +781,19 @@ function registerIpc() {
   ipcMain.handle("chat:clearMessages", async (_event) => {
     await store.clearMessages();
     broadcastSnapshotUpdated(_event.sender);
+  });
+  ipcMain.handle("chat:testApi", async (_event, apiKeyOverride?: string): Promise<{ ok: boolean; message: string }> => {
+    const settings = await store.getSettings();
+    const apiKey = apiKeyOverride?.trim() || settings.openAiApiKey || process.env.DEEPSEEK_API_KEY || process.env.OPENAI_API_KEY;
+    try {
+      await testDeepSeekApi({ apiKey, model: settings.openAiModel });
+      return { ok: true, message: `API 连接正常，模型 ${settings.openAiModel} 可用。` };
+    } catch (error) {
+      return {
+        ok: false,
+        message: error instanceof Error ? error.message : "API 测试失败。"
+      };
+    }
   });
   ipcMain.handle("chat:sendMessage", async (_event, text: string): Promise<ChatResult> => {
     const trimmed = text.trim();
@@ -873,6 +959,7 @@ function registerIpc() {
   });
   ipcMain.handle("selection:getResult", (_event, id: string) => selectionResults.get(id) ?? null);
   ipcMain.handle("selection:getCapture", (_event, id: string) => selectionCaptures.get(id) ?? null);
+  ipcMain.handle("selection:resizePopover", (_event, expanded: boolean) => resizeSelectionPopoverWindow(expanded));
   ipcMain.handle("selection:createTodoFromCapture", async (_event, id: string) => {
     const capture = selectionCaptures.get(id);
     if (!capture) throw new Error("Selected text capture not found");
