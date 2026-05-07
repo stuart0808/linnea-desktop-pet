@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer } = require("electron");
+const { contextBridge, ipcRenderer, webUtils } = require("electron");
 
 const api = {
   chat: {
@@ -42,6 +42,30 @@ const api = {
     resizePopover: (expanded) => ipcRenderer.invoke("selection:resizePopover", expanded),
     createTodoFromCapture: (id) => ipcRenderer.invoke("selection:createTodoFromCapture", id)
   },
+  codex: {
+    createSession: (items, options) => ipcRenderer.invoke("codex:createSession", items, options),
+    createSessionFromFolder: (options) => ipcRenderer.invoke("codex:createSessionFromFolder", options),
+    listSavedSessions: () => ipcRenderer.invoke("codex:listSavedSessions"),
+    openSavedSession: (savedSessionId, options) => ipcRenderer.invoke("codex:openSavedSession", savedSessionId, options),
+    renameSavedSession: (savedSessionId, name) => ipcRenderer.invoke("codex:renameSavedSession", savedSessionId, name),
+    deleteSavedSession: (savedSessionId) => ipcRenderer.invoke("codex:deleteSavedSession", savedSessionId),
+    listModels: (sessionId) => ipcRenderer.invoke("codex:listModels", sessionId),
+    listThreads: (sessionId) => ipcRenderer.invoke("codex:listThreads", sessionId),
+    resumeThread: (sessionId, threadId) => ipcRenderer.invoke("codex:resumeThread", sessionId, threadId),
+    newThread: (sessionId) => ipcRenderer.invoke("codex:newThread", sessionId),
+    getSession: (sessionId) => ipcRenderer.invoke("codex:getSession", sessionId),
+    startSession: (sessionId, options) => ipcRenderer.invoke("codex:startSession", sessionId, options),
+    sendInput: (sessionId, text) => ipcRenderer.invoke("codex:sendInput", sessionId, text),
+    setThreadSettings: (sessionId, settings) => ipcRenderer.invoke("codex:setThreadSettings", sessionId, settings),
+    respondRequest: (sessionId, requestId, response) => ipcRenderer.invoke("codex:respondRequest", sessionId, requestId, response),
+    updateSessionHistory: (sessionId, history) => ipcRenderer.invoke("codex:updateSessionHistory", sessionId, history),
+    write: (sessionId, data) => ipcRenderer.invoke("codex:write", sessionId, data),
+    resize: (sessionId, cols, rows) => ipcRenderer.invoke("codex:resize", sessionId, cols, rows),
+    stopSession: (sessionId) => ipcRenderer.invoke("codex:stopSession", sessionId),
+    saveSession: (sessionId) => ipcRenderer.invoke("codex:saveSession", sessionId),
+    discardSession: (sessionId) => ipcRenderer.invoke("codex:discardSession", sessionId),
+    openWorkspace: (sessionId) => ipcRenderer.invoke("codex:openWorkspace", sessionId)
+  },
   app: {
     snapshot: () => ipcRenderer.invoke("app:snapshot"),
     setIgnoreMouseEvents: (ignore) => ipcRenderer.invoke("app:setIgnoreMouseEvents", ignore),
@@ -54,7 +78,8 @@ const api = {
     endWindowDrag: () => ipcRenderer.invoke("app:endWindowDrag"),
     setPetWindowExpanded: (expanded) => ipcRenderer.invoke("app:setPetWindowExpanded", expanded),
     openWorkspaceWindow: (todoId) => ipcRenderer.invoke("app:openWorkspaceWindow", todoId),
-    checkForUpdates: () => ipcRenderer.invoke("app:checkForUpdates")
+    checkForUpdates: () => ipcRenderer.invoke("app:checkForUpdates"),
+    getPathForFile: (file) => webUtils.getPathForFile(file)
   },
   events: {
     onReminderFired: (callback) => {
@@ -81,6 +106,21 @@ const api = {
       const listener = () => callback();
       ipcRenderer.on("app:quickAiRecord", listener);
       return () => ipcRenderer.removeListener("app:quickAiRecord", listener);
+    },
+    onCodexOutput: (callback) => {
+      const listener = (_event, output) => callback(output);
+      ipcRenderer.on("codex:output", listener);
+      return () => ipcRenderer.removeListener("codex:output", listener);
+    },
+    onCodexExit: (callback) => {
+      const listener = (_event, exit) => callback(exit);
+      ipcRenderer.on("codex:exit", listener);
+      return () => ipcRenderer.removeListener("codex:exit", listener);
+    },
+    onCodexEvent: (callback) => {
+      const listener = (_event, event) => callback(event);
+      ipcRenderer.on("codex:event", listener);
+      return () => ipcRenderer.removeListener("codex:event", listener);
     }
   }
 };

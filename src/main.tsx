@@ -1,7 +1,7 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
-import { AlertTriangle, BarChart3, Bell, CalendarDays, Check, Clock, FileText, FolderOpen, Image as ImageIcon, Inbox, KeyRound, Languages, ListTodo, MessageCircle, Paperclip, Pencil, RotateCcw, Save, Search, Send, Settings, Sparkles, Tag, Trash2, X } from "lucide-react";
-import type { AppSettings, ConversationMessage, DesktopPetApi, PetMood, PlanProposal, ReminderItem, SelectionCapture, SelectionTextResult, TodoCandidate, TodoItem, TodoPriority } from "../shared/types";
+import { AlertTriangle, BarChart3, Bell, CalendarDays, Check, Clock, FileText, FolderOpen, Image as ImageIcon, Inbox, KeyRound, Languages, ListTodo, MessageCircle, Paperclip, Pencil, RotateCcw, Save, Search, Send, Settings, Sparkles, Square, Tag, Trash2, X } from "lucide-react";
+import type { AppSettings, CodexApprovalPolicy, CodexDropItem, CodexModelSummary, CodexReasoningEffort, CodexSandboxPolicy, CodexSavedSession, CodexSessionInfo, CodexThreadSettings, CodexThreadSummary, CodexUiActivity, CodexUiMessage, ConversationMessage, DesktopPetApi, PetMood, PlanProposal, ReminderItem, SelectionCapture, SelectionTextResult, TodoCandidate, TodoItem, TodoPriority } from "../shared/types";
 import confusedImage from "./assets/pet/linnea_state/_Confused_.png";
 import draggingImage from "./assets/pet/linnea_state/_Dragging_.png";
 import happyImage from "./assets/pet/linnea_state/_Happy_.png";
@@ -32,6 +32,41 @@ const petStateImages: Record<PetVisualState, string> = {
 };
 
 const workspaceThemePresets = ["#5aa982", "#4d8fc8", "#d59a3a", "#c56c86", "#8a75c9", "#5c8f7a"];
+const codexSlashCommands = [
+  { command: "/permissions", description: "检查或调整 Codex 能做什么。" },
+  { command: "/sandbox-add-read-dir", description: "把文件夹加入只读访问范围。" },
+  { command: "/agent", description: "创建或管理自定义 agent。" },
+  { command: "/apps", description: "连接并使用外部应用。" },
+  { command: "/plugins", description: "列出或加载插件。" },
+  { command: "/clear", description: "清空当前上下文。" },
+  { command: "/compact", description: "压缩上下文，保留摘要继续会话。" },
+  { command: "/copy", description: "复制最近一条 Codex 回复。" },
+  { command: "/diff", description: "查看工作区差异。" },
+  { command: "/exit", description: "退出 Codex。" },
+  { command: "/experimental", description: "查看实验功能。" },
+  { command: "/feedback", description: "发送反馈。" },
+  { command: "/init", description: "生成或更新 AGENTS.md。" },
+  { command: "/logout", description: "退出登录。" },
+  { command: "/mcp", description: "查看 MCP 服务和工具。" },
+  { command: "/mention", description: "打开文件选择器并引用文件。" },
+  { command: "/model", description: "切换模型和推理强度。" },
+  { command: "/fast", description: "切换到低推理模型。" },
+  { command: "/plan", description: "进入计划模式。" },
+  { command: "/personality", description: "切换回复风格。" },
+  { command: "/ps", description: "查看后台 agent 任务。" },
+  { command: "/stop", description: "停止当前响应。" },
+  { command: "/fork", description: "从当前点 fork 会话。" },
+  { command: "/side", description: "开启 side task。" },
+  { command: "/resume", description: "打开会话选择器恢复会话。" },
+  { command: "/new", description: "开始新会话。" },
+  { command: "/quit", description: "退出 Codex。" },
+  { command: "/review", description: "让 Codex 审查当前改动。" },
+  { command: "/status", description: "显示当前会话和配置。" },
+  { command: "/debug-config", description: "输出调试配置。" },
+  { command: "/statusline", description: "管理 statusline。" },
+  { command: "/title", description: "设置会话标题。" },
+  { command: "/keymap", description: "打开快捷键帮助。" }
+];
 const aiProviderPresets: Record<AppSettings["aiProvider"], { label: string; baseUrl: string; model: string }> = {
   deepseek: { label: "DeepSeek", baseUrl: "https://api.deepseek.com", model: "deepseek-v4-flash" },
   openai: { label: "OpenAI", baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini" },
@@ -44,8 +79,13 @@ function App() {
   const isWorkspaceWindow = windowMode === "workspace";
   const isSelectionResultWindow = windowMode === "selection-result";
   const isSelectionPopoverWindow = windowMode === "selection-popover";
+  const isCodexWindow = windowMode === "codex";
   const selectionResultId = searchParams.get("id") ?? "";
   const selectionCaptureId = searchParams.get("id") ?? "";
+  const codexSessionId = searchParams.get("id") ?? "";
+  const codexInitialPrompt = searchParams.get("prompt") ?? "";
+  const codexInitialSandbox = normalizeCodexSandbox(searchParams.get("sandbox"));
+  const codexInitialApproval = normalizeCodexApproval(searchParams.get("approval"));
   const api = window.desktopPet;
   const [messages, setMessages] = React.useState<ConversationMessage[]>([]);
   const [todos, setTodos] = React.useState<TodoItem[]>([]);
@@ -64,6 +104,13 @@ function App() {
   const [toast, setToast] = React.useState("");
   const [now, setNow] = React.useState(() => Date.now());
   const [dragging, setDragging] = React.useState(false);
+  const [codexDragActive, setCodexDragActive] = React.useState(false);
+  const [codexBasketOpen, setCodexBasketOpen] = React.useState(false);
+  const [codexItems, setCodexItems] = React.useState<CodexDropItem[]>([]);
+  const [codexSandbox, setCodexSandbox] = React.useState<CodexSandboxPolicy>("workspace-write");
+  const [codexApproval, setCodexApproval] = React.useState<CodexApprovalPolicy>("on-request");
+  const [codexCreateBusy, setCodexCreateBusy] = React.useState(false);
+  const [codexError, setCodexError] = React.useState("");
   const [lastInteractionAt, setLastInteractionAt] = React.useState(() => Date.now());
   const clickTimerRef = React.useRef<number | null>(null);
   const miniCloseTimerRef = React.useRef<number | null>(null);
@@ -95,11 +142,11 @@ function App() {
   );
 
   React.useEffect(() => {
-    if (!api || (!isSelectionResultWindow && !isSelectionPopoverWindow)) return;
+    if (!api || (!isSelectionResultWindow && !isSelectionPopoverWindow && !isCodexWindow)) return;
     void api.settings.get().then(setSettings).catch(() => {
       // Keep the default theme if settings cannot be read in a transient utility window.
     });
-  }, [api, isSelectionPopoverWindow, isSelectionResultWindow]);
+  }, [api, isCodexWindow, isSelectionPopoverWindow, isSelectionResultWindow]);
 
   if (isSelectionResultWindow) {
     return <SelectionResultWindow api={api} resultId={selectionResultId} themeStyle={themeStyle} />;
@@ -107,6 +154,19 @@ function App() {
 
   if (isSelectionPopoverWindow) {
     return <GlobalSelectionPopoverWindow api={api} captureId={selectionCaptureId} themeStyle={themeStyle} />;
+  }
+
+  if (isCodexWindow) {
+    return (
+      <CodexTerminalWindow
+        api={api}
+        sessionId={codexSessionId}
+        initialPrompt={codexInitialPrompt}
+        sandbox={codexInitialSandbox}
+        approval={codexInitialApproval}
+        themeStyle={themeStyle}
+      />
+    );
   }
 
   function markInteraction() {
@@ -179,8 +239,8 @@ function App() {
 
   React.useEffect(() => {
     if (isWorkspaceWindow || !api || dragging) return;
-    void api.app.setPetWindowExpanded(chatOpen);
-  }, [api, chatOpen, dragging, isWorkspaceWindow]);
+    void api.app.setPetWindowExpanded(chatOpen || codexBasketOpen);
+  }, [api, chatOpen, codexBasketOpen, dragging, isWorkspaceWindow]);
 
   React.useEffect(() => {
     return () => {
@@ -288,6 +348,12 @@ function App() {
       window.setTimeout(() => miniInputRef.current?.focus(), 80);
     });
   }, [api, isWorkspaceWindow]);
+
+  React.useEffect(() => {
+    if (!settings) return;
+    setCodexSandbox(settings.codexDefaultSandbox);
+    setCodexApproval(settings.codexDefaultApproval);
+  }, [settings?.codexDefaultApproval, settings?.codexDefaultSandbox]);
 
   async function toggleTodo(todo: TodoItem) {
     if (!api) return;
@@ -540,6 +606,56 @@ function App() {
     void api?.app.openWorkspaceWindow();
   }
 
+  function handleCodexDragOver(event: React.DragEvent) {
+    if (!hasFileDrop(event)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+    setCodexDragActive(true);
+  }
+
+  function handleCodexDragLeave(event: React.DragEvent) {
+    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+      setCodexDragActive(false);
+    }
+  }
+
+  function handleCodexDrop(event: React.DragEvent) {
+    if (!hasFileDrop(event)) return;
+    event.preventDefault();
+    setCodexDragActive(false);
+    const items = getDropItems(event.dataTransfer, api);
+    if (!items.length) return;
+    setCodexItems((current) => dedupeCodexItems([...current, ...items]));
+    setCodexBasketOpen(true);
+    setChatOpen(false);
+    setMiniMessage(null);
+    setCodexError("");
+    setMood("talking");
+    setBubble(`已加入 ${items.length} 个项目，确认后再交给 Codex。`);
+    markInteraction();
+  }
+
+  async function startCodexFromBasket() {
+    if (!api || !codexItems.length || codexCreateBusy) return;
+    setCodexCreateBusy(true);
+    setCodexError("");
+    try {
+      await api.codex.createSession(codexItems, {
+        sandbox: codexSandbox,
+        approval: codexApproval
+      });
+      setCodexBasketOpen(false);
+      setCodexItems([]);
+      setMood("happy");
+      setBubble("Codex 会话已打开。");
+    } catch (error) {
+      setMood("confused");
+      setCodexError(error instanceof Error ? error.message : "启动 Codex 失败。");
+    } finally {
+      setCodexCreateBusy(false);
+    }
+  }
+
   if (isWorkspaceWindow) {
     return (
       <WorkspaceWindow
@@ -580,8 +696,36 @@ function App() {
   }
 
   return (
-    <main className={`shell pet-only ${chatOpen ? "chat-open" : ""}`} style={themeStyle}>
+    <main
+      className={`shell pet-only ${chatOpen ? "chat-open" : ""} ${codexBasketOpen ? "codex-basket-open" : ""} ${codexDragActive ? "codex-drag-active" : ""}`}
+      style={themeStyle}
+      onDragEnter={handleCodexDragOver}
+      onDragOver={handleCodexDragOver}
+      onDragLeave={handleCodexDragLeave}
+      onDrop={handleCodexDrop}
+    >
       <section className="pet-stage">
+        {codexDragActive && (
+          <div className="codex-drop-overlay">
+            <Paperclip size={18} />
+            <strong>松开加入 Codex 文件篮</strong>
+          </div>
+        )}
+        {codexBasketOpen && (
+          <CodexBasketPopover
+            items={codexItems}
+            sandbox={codexSandbox}
+            approval={codexApproval}
+            busy={codexCreateBusy}
+            error={codexError}
+            onSandboxChange={setCodexSandbox}
+            onApprovalChange={setCodexApproval}
+            onRemove={(path) => setCodexItems((current) => current.filter((item) => item.path !== path))}
+            onClear={() => setCodexItems([])}
+            onClose={() => setCodexBasketOpen(false)}
+            onStart={() => void startCodexFromBasket()}
+          />
+        )}
         {!chatOpen && activeReminder && bubble && (
           <div className="reminder-bubble">
             {bubble}
@@ -740,7 +884,7 @@ function WorkspaceWindow({
   focusedTodoId: string | null;
   onTestReminder(): Promise<void>;
 }) {
-  const [activeTab, setActiveTab] = React.useState<"workspace" | "todos" | "calendar" | "summary" | "settings">("workspace");
+  const [activeTab, setActiveTab] = React.useState<"quickstart" | "workspace" | "todos" | "calendar" | "summary" | "codex" | "settings">("workspace");
   const [summaryText, setSummaryText] = React.useState("");
   const [summaryBusy, setSummaryBusy] = React.useState(false);
   const [summaryError, setSummaryError] = React.useState("");
@@ -793,6 +937,13 @@ function WorkspaceWindow({
         </div>
         <nav className="workspace-nav" aria-label="Linnea 工作窗口导航">
           <button
+            className={`workspace-nav-item ${activeTab === "quickstart" ? "active" : ""}`}
+            onClick={() => setActiveTab("quickstart")}
+          >
+            <FileText size={17} />
+            快速入门
+          </button>
+          <button
             className={`workspace-nav-item ${activeTab === "workspace" ? "active" : ""}`}
             onClick={() => setActiveTab("workspace")}
           >
@@ -821,6 +972,13 @@ function WorkspaceWindow({
             总结
           </button>
           <button
+            className={`workspace-nav-item ${activeTab === "codex" ? "active" : ""}`}
+            onClick={() => setActiveTab("codex")}
+          >
+            <Sparkles size={17} />
+            Codex
+          </button>
+          <button
             className={`workspace-nav-item ${activeTab === "settings" ? "active" : ""}`}
             onClick={() => setActiveTab("settings")}
           >
@@ -831,7 +989,11 @@ function WorkspaceWindow({
       </aside>
 
       <section className="workspace-content">
-        {activeTab === "workspace" ? (
+        {activeTab === "quickstart" ? (
+          <QuickStartPanel
+            onOpenTab={setActiveTab}
+          />
+        ) : activeTab === "workspace" ? (
           <section className="workspace-grid chat-only-grid">
             <section className="workspace-card chat-card">
               <div className="section-title">
@@ -906,6 +1068,8 @@ function WorkspaceWindow({
               onQuickTodoText(text);
             }}
           />
+        ) : activeTab === "codex" ? (
+          <CodexWorkspacePanel api={api} settings={settings} />
         ) : (
           <section className="workspace-card settings-card">
             <div className="section-title">
@@ -931,12 +1095,570 @@ function WorkspaceWindow({
   );
 }
 
+type WorkspaceTab = "quickstart" | "workspace" | "todos" | "calendar" | "summary" | "codex" | "settings";
+type QuickStartStage = "capture" | "draft" | "plan" | "review";
+
+const quickStartExamples = [
+  "明天下午 3 点提醒我交周报，并把客户反馈整理成三条要点",
+  "下周一上午安排 45 分钟复盘项目进度，标记为高优先级",
+  "今晚 9 点提醒我检查论文图表，把缺失数据列成待办"
+];
+
+const quickStartTours: Array<{ tab: WorkspaceTab; title: string; detail: string; action: string }> = [
+  { tab: "workspace", title: "对话记录任务", detail: "直接告诉 Linnea 要做什么，她会先生成待办草案，确认后才写入列表。", action: "打开对话" },
+  { tab: "todos", title: "整理待办", detail: "在待办页按项目、标签、优先级筛选，并在右侧编辑截止、提醒、子任务和备注。", action: "查看待办" },
+  { tab: "calendar", title: "拖入日历", detail: "把任务池里的任务安排到日/周/月视图，区分截止时间和实际计划时间。", action: "打开日历" },
+  { tab: "summary", title: "复盘风险", detail: "总结页会聚合今日计划、未来重点和风险任务，适合每天收尾时检查。", action: "查看总结" },
+  { tab: "codex", title: "交给 Codex", detail: "拖拽文件到桌宠或在 Codex 页选择文件夹，创建隔离副本后再开始代码任务。", action: "打开 Codex" },
+  { tab: "settings", title: "调整偏好", detail: "设置 AI 服务、快捷键、系统通知、主题色和桌宠形象。", action: "打开设置" }
+];
+
+function QuickStartPanel({
+  onOpenTab
+}: {
+  onOpenTab(tab: WorkspaceTab): void;
+}) {
+  const [stage, setStage] = React.useState<QuickStartStage>("capture");
+  const [completed, setCompleted] = React.useState<string[]>([]);
+  const [selectedExample, setSelectedExample] = React.useState(quickStartExamples[0]);
+  const [draftReady, setDraftReady] = React.useState(false);
+  const [todoAccepted, setTodoAccepted] = React.useState(false);
+  const [scheduledSlot, setScheduledSlot] = React.useState("");
+  const [taskDone, setTaskDone] = React.useState(false);
+  const [codexBasket, setCodexBasket] = React.useState<string[]>([]);
+  const [demoNotifications, setDemoNotifications] = React.useState(true);
+  const [demoTopMost, setDemoTopMost] = React.useState(true);
+  const [demoAccent, setDemoAccent] = React.useState(workspaceThemePresets[0]);
+
+  const stageIndex = ["capture", "draft", "plan", "review"].indexOf(stage);
+  const progress = Math.min(100, Math.round((completed.length / 8) * 100));
+  const demoTitle = selectedExample.includes("周报")
+    ? "交周报并整理客户反馈"
+    : selectedExample.includes("项目")
+      ? "复盘项目进度"
+      : "检查论文图表";
+  const demoDue = selectedExample.includes("周报") ? "明天 15:00" : selectedExample.includes("项目") ? "下周一 09:00" : "今晚 21:00";
+
+  function complete(id: string) {
+    setCompleted((current) => current.includes(id) ? current : [...current, id]);
+  }
+
+  function moveStage(next: QuickStartStage) {
+    setStage(next);
+    complete(next);
+  }
+
+  function resetQuickStart() {
+    setStage("capture");
+    setCompleted([]);
+    setSelectedExample(quickStartExamples[0]);
+    setDraftReady(false);
+    setTodoAccepted(false);
+    setScheduledSlot("");
+    setTaskDone(false);
+    setCodexBasket([]);
+    setDemoNotifications(true);
+    setDemoTopMost(true);
+    setDemoAccent(workspaceThemePresets[0]);
+  }
+
+  function createDraft() {
+    setDraftReady(true);
+    moveStage("draft");
+    complete("workspace");
+    complete("draft");
+  }
+
+  function acceptTodo() {
+    if (!draftReady) return;
+    setTodoAccepted(true);
+    moveStage("plan");
+    complete("todos");
+  }
+
+  function scheduleTodo(slot: string) {
+    if (!todoAccepted) return;
+    setScheduledSlot(slot);
+    moveStage("plan");
+    complete("calendar");
+  }
+
+  function addCodexItem(path: string) {
+    setCodexBasket((current) => current.includes(path) ? current : [...current, path]);
+    complete("codex");
+  }
+
+  return (
+    <section className="workspace-card quickstart-card">
+      <div className="section-title">
+        <span>快速入门</span>
+        <button type="button" className="summary-generate-button" onClick={resetQuickStart}>
+          <RotateCcw size={14} /> 重置
+        </button>
+      </div>
+      <div className="quickstart-body">
+        <section className="quickstart-hero">
+          <div>
+            <strong>在这里体验 Linnea 的完整工作流</strong>
+            <span>不用离开快速入门：生成草案、确认待办、拖入日历、复盘、试 Codex 文件篮和设置偏好。</span>
+          </div>
+          <div className="quickstart-progress" aria-label={`入门进度 ${progress}%`}>
+            <span style={{ width: `${progress}%` }} />
+          </div>
+        </section>
+
+        <section className="quickstart-layout">
+          <aside className="quickstart-examples">
+            <strong>试一个真实输入</strong>
+            {quickStartExamples.map((example) => (
+              <button
+                key={example}
+                type="button"
+                className={selectedExample === example ? "active" : ""}
+                onClick={() => {
+                  setSelectedExample(example);
+                  complete("example");
+                }}
+              >
+                <MessageCircle size={14} />
+                <span>{example}</span>
+              </button>
+            ))}
+            <button type="button" className="quickstart-primary" onClick={createDraft}>
+              <Send size={15} /> 在本页生成草案
+            </button>
+          </aside>
+
+          <section className="quickstart-flow" aria-label="拖动观察任务工作流">
+            <div className="quickstart-flow-header">
+              <strong>拖动观察工作流</strong>
+              <span>把任务卡拖到下一步，Linnea 会展示每个阶段发生了什么。</span>
+            </div>
+            <div className="quickstart-flow-grid">
+              <QuickStartDropZone
+                active={stage === "capture"}
+                done={stageIndex > 0}
+                title="1. 捕获"
+                detail="从对话、快捷键或选中文字开始记录。"
+                onDropStage={() => moveStage("capture")}
+              />
+              <QuickStartDropZone
+                active={stage === "draft"}
+                done={stageIndex > 1}
+                title="2. 草案"
+                detail="AI 先拆解任务，等待你确认，不会直接写入。"
+                onDropStage={() => moveStage("draft")}
+              />
+              <QuickStartDropZone
+                active={stage === "plan"}
+                done={stageIndex > 2}
+                title="3. 排程"
+                detail="确认后的任务进入待办，可拖到日历时间块。"
+                onDropStage={() => moveStage("plan")}
+              />
+              <QuickStartDropZone
+                active={stage === "review"}
+                done={stageIndex > 3}
+                title="4. 复盘"
+                detail="总结页检查完成度、风险和明天重点。"
+                onDropStage={() => moveStage("review")}
+              />
+            </div>
+            <button
+              type="button"
+              className="quickstart-drag-card"
+              draggable
+              onDragStart={(event) => {
+                event.dataTransfer.setData("text/plain", stage);
+                event.dataTransfer.effectAllowed = "move";
+              }}
+            >
+              <ListTodo size={15} />
+              <span>{selectedExample}</span>
+            </button>
+            <div className="quickstart-stage-note">
+              {stage === "capture" && "当前阶段：先把脑中的事项说出来，Linnea 会负责整理结构。"}
+              {stage === "draft" && "当前阶段：检查 AI 草案，确认标题、时间、优先级是否正确。"}
+              {stage === "plan" && "当前阶段：在待办或日历里安排真正执行的时间。"}
+              {stage === "review" && "当前阶段：用总结页回看完成情况和风险任务。"}
+            </div>
+            <div className="quickstart-demo-lab">
+              <article className="quickstart-demo-card">
+                <div className="quickstart-demo-title">
+                  <MessageCircle size={15} />
+                  <strong>对话与草案</strong>
+                </div>
+                <div className="quickstart-chat-sim user">{selectedExample}</div>
+                {draftReady ? (
+                  <div className="quickstart-chat-sim assistant">
+                    <strong>{demoTitle}</strong>
+                    <span>截止：{demoDue} · 优先级：{selectedExample.includes("高优先级") ? "P1 高" : "P2 中"}</span>
+                    <small>这是草案，确认后才会写入待办。</small>
+                  </div>
+                ) : (
+                  <button type="button" onClick={createDraft}>生成 AI 草案</button>
+                )}
+              </article>
+
+              <article className="quickstart-demo-card">
+                <div className="quickstart-demo-title">
+                  <ListTodo size={15} />
+                  <strong>待办确认</strong>
+                </div>
+                <button type="button" className={`quickstart-todo-sim ${todoAccepted ? "done" : ""}`} onClick={acceptTodo} disabled={!draftReady}>
+                  <span>{todoAccepted ? <Check size={13} /> : null}</span>
+                  <div>
+                    <strong>{demoTitle}</strong>
+                    <small>{draftReady ? "点击确认写入待办" : "先生成草案"}</small>
+                  </div>
+                </button>
+              </article>
+
+              <article className="quickstart-demo-card quickstart-calendar-sim">
+                <div className="quickstart-demo-title">
+                  <CalendarDays size={15} />
+                  <strong>日历排程</strong>
+                </div>
+                <button
+                  type="button"
+                  className="quickstart-mini-task"
+                  draggable={todoAccepted}
+                  disabled={!todoAccepted}
+                  onDragStart={(event) => event.dataTransfer.setData("text/plain", "demo-task")}
+                >
+                  {demoTitle}
+                </button>
+                <div className="quickstart-slots">
+                  {["上午 09:00", "下午 15:00"].map((slot) => (
+                    <button
+                      key={slot}
+                      type="button"
+                      className={scheduledSlot === slot ? "active" : ""}
+                      onClick={() => scheduleTodo(slot)}
+                      onDragOver={(event) => {
+                        if (!todoAccepted) return;
+                        event.preventDefault();
+                      }}
+                      onDrop={(event) => {
+                        event.preventDefault();
+                        scheduleTodo(slot);
+                      }}
+                    >
+                      <Clock size={13} />
+                      <span>{scheduledSlot === slot ? demoTitle : slot}</span>
+                    </button>
+                  ))}
+                </div>
+              </article>
+
+              <article className="quickstart-demo-card">
+                <div className="quickstart-demo-title">
+                  <BarChart3 size={15} />
+                  <strong>总结复盘</strong>
+                </div>
+                <div className="quickstart-kpis">
+                  <span><strong>{todoAccepted ? 1 : 0}</strong> 已确认</span>
+                  <span><strong>{scheduledSlot ? 1 : 0}</strong> 已排程</span>
+                  <span><strong>{taskDone ? 0 : 1}</strong> 待关注</span>
+                </div>
+                <button type="button" onClick={() => {
+                  setTaskDone(true);
+                  moveStage("review");
+                  complete("summary");
+                }} disabled={!scheduledSlot}>
+                  标记完成并复盘
+                </button>
+              </article>
+
+              <article className="quickstart-demo-card">
+                <div className="quickstart-demo-title">
+                  <Paperclip size={15} />
+                  <strong>Codex 文件篮</strong>
+                </div>
+                <div className="quickstart-file-row">
+                  {["src/main.tsx", "README.md"].map((path) => (
+                    <button
+                      key={path}
+                      type="button"
+                      draggable
+                      onClick={() => addCodexItem(path)}
+                      onDragStart={(event) => event.dataTransfer.setData("text/plain", path)}
+                    >
+                      <FileText size={13} /> {path}
+                    </button>
+                  ))}
+                </div>
+                <div
+                  className={`quickstart-basket ${codexBasket.length ? "filled" : ""}`}
+                  onDragOver={(event) => event.preventDefault()}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    addCodexItem(event.dataTransfer.getData("text/plain"));
+                  }}
+                >
+                  {codexBasket.length ? `${codexBasket.length} 个文件已加入隔离副本` : "拖文件到这里"}
+                </div>
+              </article>
+
+              <article className="quickstart-demo-card">
+                <div className="quickstart-demo-title">
+                  <Settings size={15} />
+                  <strong>设置偏好</strong>
+                </div>
+                <div className="quickstart-setting-row">
+                  <button type="button" className={demoNotifications ? "active" : ""} onClick={() => {
+                    setDemoNotifications((value) => !value);
+                    complete("settings");
+                  }}>系统通知</button>
+                  <button type="button" className={demoTopMost ? "active" : ""} onClick={() => {
+                    setDemoTopMost((value) => !value);
+                    complete("settings");
+                  }}>始终置顶</button>
+                </div>
+                <div className="quickstart-theme-row">
+                  {workspaceThemePresets.slice(0, 4).map((color) => (
+                    <button
+                      key={color}
+                      type="button"
+                      className={demoAccent === color ? "active" : ""}
+                      style={{ backgroundColor: color }}
+                      onClick={() => {
+                        setDemoAccent(color);
+                        complete("settings");
+                      }}
+                      aria-label={`体验主题色 ${color}`}
+                    />
+                  ))}
+                </div>
+              </article>
+            </div>
+          </section>
+
+          <section className="quickstart-tour">
+            <strong>功能巡览</strong>
+            {quickStartTours.map((item) => (
+              <article key={item.tab} className={completed.includes(item.tab) ? "done" : ""}>
+                <div>
+                  <span className="quickstart-check">{completed.includes(item.tab) ? <Check size={13} /> : null}</span>
+                  <div>
+                    <strong>{item.title}</strong>
+                    <p>{item.detail}</p>
+                  </div>
+                </div>
+                <button type="button" onClick={() => {
+                  complete(item.tab);
+                  onOpenTab(item.tab);
+                }}>
+                  {item.action}
+                </button>
+              </article>
+            ))}
+          </section>
+        </section>
+      </div>
+    </section>
+  );
+}
+
+function QuickStartDropZone({
+  active,
+  done,
+  title,
+  detail,
+  onDropStage
+}: {
+  active: boolean;
+  done: boolean;
+  title: string;
+  detail: string;
+  onDropStage(): void;
+}) {
+  return (
+    <button
+      type="button"
+      className={`quickstart-zone ${active ? "active" : ""} ${done ? "done" : ""}`}
+      onClick={onDropStage}
+      onDragOver={(event) => {
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "move";
+      }}
+      onDrop={(event) => {
+        event.preventDefault();
+        onDropStage();
+      }}
+    >
+      <span>{done ? <Check size={13} /> : null}</span>
+      <strong>{title}</strong>
+      <small>{detail}</small>
+    </button>
+  );
+}
+
 function LinneaPet({ state, images, showAlert }: { state: PetVisualState; images: Record<PetVisualState, string>; showAlert: boolean }) {
   return (
     <span className={`pet-image-wrap pet-${state}`}>
       <img className="pet-image" src={images[state]} alt={`Q版桌宠 ${state} 状态`} draggable={false} />
       {showAlert && <span className="reminder-star" aria-hidden="true">!</span>}
     </span>
+  );
+}
+
+function CodexWorkspacePanel({ api, settings }: { api?: DesktopPetApi; settings: AppSettings | null }) {
+  const [savedSessions, setSavedSessions] = React.useState<CodexSavedSession[]>([]);
+  const [activeSession, setActiveSession] = React.useState<CodexSessionInfo | null>(null);
+  const [busy, setBusy] = React.useState(false);
+  const [openingId, setOpeningId] = React.useState("");
+  const [deletingIds, setDeletingIds] = React.useState<string[]>([]);
+  const [error, setError] = React.useState("");
+  const [editingId, setEditingId] = React.useState("");
+  const [editingName, setEditingName] = React.useState("");
+  const sandbox = settings?.codexDefaultSandbox ?? "workspace-write";
+  const approval = settings?.codexDefaultApproval ?? "on-request";
+
+  const refresh = React.useCallback(async () => {
+    if (!api) return;
+    setSavedSessions(await api.codex.listSavedSessions());
+  }, [api]);
+
+  React.useEffect(() => {
+    void refresh().catch((reason) => setError(reason instanceof Error ? reason.message : "读取 Codex 会话失败。"));
+  }, [refresh]);
+
+  async function startFromFolder() {
+    if (!api || busy) return;
+    setBusy(true);
+      setError("");
+    try {
+      const session = await api.codex.createSessionFromFolder({ sandbox, approval });
+      await refresh();
+      if (session) setActiveSession(session);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "启动 Codex 失败。");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function openSaved(session: CodexSavedSession) {
+    if (!api || deletingIds.includes(session.id)) return;
+    setOpeningId(session.id);
+    setError("");
+    try {
+      const next = await api.codex.openSavedSession(session.id, { sandbox, approval });
+      setActiveSession(next);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "打开保存会话失败。");
+    } finally {
+      setOpeningId("");
+    }
+  }
+
+  async function commitRename(session: CodexSavedSession) {
+    if (!api || editingId !== session.id) return;
+    const nextName = editingName.trim();
+    setEditingId("");
+    if (!nextName || nextName === session.name) return;
+    try {
+      await api.codex.renameSavedSession(session.id, nextName);
+      await refresh();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "重命名失败。");
+    }
+  }
+
+  async function deleteSaved(session: CodexSavedSession) {
+    if (!api || deletingIds.includes(session.id)) return;
+    const confirmed = window.confirm(`删除 Codex 对话“${session.name}”？对应的副本文件夹也会被删除。`);
+    if (!confirmed) return;
+    setError("");
+    setDeletingIds((current) => [...current, session.id]);
+    setSavedSessions((current) => current.filter((item) => item.id !== session.id));
+    if (activeSession?.savedPath === session.rootPath || activeSession?.workspacePath === session.workspacePath) setActiveSession(null);
+    try {
+      await api.codex.deleteSavedSession(session.id);
+      await refresh();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "删除失败。");
+      await refresh();
+    } finally {
+      setDeletingIds((current) => current.filter((id) => id !== session.id));
+    }
+  }
+
+  return (
+    <section className="workspace-card codex-workspace-card">
+      <div className="section-title">
+        <span>Codex</span>
+        <button type="button" className="summary-generate-button" onClick={() => void refresh()} disabled={busy}>
+          <RotateCcw size={14} /> 刷新
+        </button>
+      </div>
+      <div className="codex-workspace-body">
+        <aside className="codex-workspace-sidebar">
+          <div className="codex-start-panel">
+          <button type="button" onClick={() => void startFromFolder()} disabled={!api || busy}>
+              <FolderOpen size={15} /> 选择文件夹
+          </button>
+          {error && <div className="codex-error">{error}</div>}
+          </div>
+          <div className="codex-saved-panel">
+          <strong>保存的对话</strong>
+          <div className="codex-saved-list">
+            {savedSessions.length === 0 ? (
+              <div className="summary-empty">还没有保存的 Codex 会话。</div>
+            ) : savedSessions.map((session) => (
+              <article key={session.id} className={`codex-saved-item ${activeSession?.savedPath === session.rootPath || activeSession?.workspacePath === session.workspacePath ? "active" : ""}`}>
+                <button type="button" className="codex-saved-main" onClick={() => void openSaved(session)} disabled={deletingIds.includes(session.id)}>
+                  {editingId === session.id ? (
+                    <input
+                      value={editingName}
+                      autoFocus
+                      onClick={(event) => event.stopPropagation()}
+                      onChange={(event) => setEditingName(event.target.value)}
+                      onBlur={() => void commitRename(session)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") event.currentTarget.blur();
+                        if (event.key === "Escape") setEditingId("");
+                      }}
+                    />
+                  ) : (
+                    <strong
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setEditingId(session.id);
+                        setEditingName(session.name);
+                      }}
+                    >
+                      {session.name}
+                    </strong>
+                  )}
+                  <span>{openingId === session.id ? "正在打开..." : new Date(session.createdAt).toLocaleString()}</span>
+                  <small>{session.workspacePath}</small>
+                </button>
+                <button type="button" className="codex-saved-delete" onClick={() => void deleteSaved(session)} disabled={deletingIds.includes(session.id)} aria-label={`删除 ${session.name}`}>
+                  <Trash2 size={13} />
+                </button>
+              </article>
+            ))}
+          </div>
+          </div>
+        </aside>
+        <section className="codex-workspace-conversation">
+          {activeSession ? (
+            <CodexEmbeddedConversation
+              key={activeSession.id}
+              api={api}
+              sessionInfo={activeSession}
+              sandbox={sandbox}
+              approval={approval}
+              onSessionChange={setActiveSession}
+            />
+          ) : (
+            <div className="codex-empty codex-workspace-empty">选择一个历史对话，或先选择文件夹开始。</div>
+          )}
+        </section>
+      </div>
+    </section>
   );
 }
 
@@ -948,6 +1670,1475 @@ function mergePetImages(customImages?: Partial<Record<string, string>>): Record<
     if (customImage) images[state] = customImage;
   }
   return images;
+}
+
+function hasFileDrop(event: React.DragEvent) {
+  return Array.from(event.dataTransfer.types).includes("Files");
+}
+
+function getDropItems(dataTransfer: DataTransfer, api?: DesktopPetApi): CodexDropItem[] {
+  return Array.from(dataTransfer.files)
+    .map<CodexDropItem | null>((file) => {
+      const path = api?.app.getPathForFile(file) || (file as File & { path?: string }).path;
+      if (!path) return null;
+      return {
+        path,
+        name: file.name || path.split(/[\\/]/).pop() || path,
+        kind: "unknown" as const
+      };
+    })
+    .filter((item): item is CodexDropItem => item !== null);
+}
+
+function dedupeCodexItems(items: CodexDropItem[]) {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    const key = item.path.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function normalizeCodexSandbox(value: string | null | undefined): CodexSandboxPolicy {
+  if (value === "read-only" || value === "danger-full-access") return value;
+  return "workspace-write";
+}
+
+function normalizeCodexApproval(value: string | null | undefined): CodexApprovalPolicy {
+  return value === "never" ? "never" : "on-request";
+}
+
+function CodexBasketPopover({
+  items,
+  sandbox,
+  approval,
+  busy,
+  error,
+  onSandboxChange,
+  onApprovalChange,
+  onRemove,
+  onClear,
+  onClose,
+  onStart
+}: {
+  items: CodexDropItem[];
+  sandbox: CodexSandboxPolicy;
+  approval: CodexApprovalPolicy;
+  busy: boolean;
+  error: string;
+  onSandboxChange(value: CodexSandboxPolicy): void;
+  onApprovalChange(value: CodexApprovalPolicy): void;
+  onRemove(path: string): void;
+  onClear(): void;
+  onClose(): void;
+  onStart(): void;
+}) {
+  return (
+    <section className="codex-basket" aria-label="Codex 文件篮">
+      <div className="codex-basket-header">
+        <div>
+          <strong>Codex 文件篮</strong>
+          <span>{items.length ? `${items.length} 个项目等待处理` : "继续拖入文件或文件夹"}</span>
+        </div>
+        <button type="button" onClick={onClose} aria-label="关闭">
+          <X size={15} />
+        </button>
+      </div>
+      <div className="codex-basket-list">
+        {items.length === 0 ? (
+          <div className="codex-empty">拖入文件或文件夹后，会先加入这里。</div>
+        ) : items.map((item) => (
+          <div className="codex-basket-item" key={item.path}>
+            <FileText size={14} />
+            <div>
+              <strong>{item.name}</strong>
+              <span>{item.path}</span>
+            </div>
+            <button type="button" onClick={() => onRemove(item.path)} aria-label={`移除 ${item.name}`}>
+              <X size={13} />
+            </button>
+          </div>
+        ))}
+      </div>
+      <div className="codex-policy-grid">
+        <label>
+          Sandbox
+          <select value={sandbox} onChange={(event) => onSandboxChange(event.target.value as CodexSandboxPolicy)}>
+            <option value="read-only">只读分析</option>
+            <option value="workspace-write">允许修改副本</option>
+            <option value="danger-full-access">完全权限</option>
+          </select>
+        </label>
+        <label>
+          Approval
+          <select value={approval} onChange={(event) => onApprovalChange(event.target.value as CodexApprovalPolicy)}>
+            <option value="on-request">需要时询问</option>
+            <option value="never">不询问</option>
+          </select>
+        </label>
+      </div>
+      {error && <div className="codex-error">{error}</div>}
+      <div className="codex-basket-actions">
+        <button type="button" onClick={onClear} disabled={!items.length || busy}>清空</button>
+        <button type="button" onClick={onStart} disabled={!items.length || busy}>
+          <Sparkles size={14} /> {busy ? "创建中..." : "开始 Codex"}
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function CodexTerminalWindow({
+  api,
+  sessionId,
+  initialPrompt,
+  sandbox,
+  approval,
+  themeStyle
+}: {
+  api?: DesktopPetApi;
+  sessionId: string;
+  initialPrompt: string;
+  sandbox: CodexSandboxPolicy;
+  approval: CodexApprovalPolicy;
+  themeStyle: React.CSSProperties;
+}) {
+  const startedRef = React.useRef(false);
+  const messagesEndRef = React.useRef<HTMLDivElement | null>(null);
+  const activeThreadIdRef = React.useRef<string | undefined>(undefined);
+  const [session, setSession] = React.useState<CodexSessionInfo | null>(null);
+  const [status, setStatus] = React.useState<"starting" | "running" | "exited" | "error">("starting");
+  const [statusText, setStatusText] = React.useState("正在启动 Codex...");
+  const [saving, setSaving] = React.useState(false);
+  const [input, setInput] = React.useState("");
+  const [inputHistory, setInputHistory] = React.useState<string[]>([]);
+  const [inputHistoryIndex, setInputHistoryIndex] = React.useState<number | null>(null);
+  const [messages, setMessages] = React.useState<CodexUiMessage[]>([]);
+  const [activity, setActivity] = React.useState<CodexUiActivity[]>([]);
+  const [requests, setRequests] = React.useState<Array<{ id: number | string; method: string; params: any }>>([]);
+  const [rawEvents, setRawEvents] = React.useState<string[]>([]);
+  const [models, setModels] = React.useState<CodexModelSummary[]>([]);
+  const [resumeThreads, setResumeThreads] = React.useState<CodexThreadSummary[]>([]);
+  const [resumeBusy, setResumeBusy] = React.useState(false);
+  const [resumeIndex, setResumeIndex] = React.useState(0);
+  const [suggestionIndex, setSuggestionIndex] = React.useState(0);
+  const suggestions = getCodexInputSuggestions(input, session, models);
+  const activeSettings = getCodexActiveThreadSettings(session);
+
+  React.useEffect(() => {
+    setSuggestionIndex(0);
+  }, [input, suggestions.length]);
+
+  React.useEffect(() => {
+    if (!api || !sessionId) return;
+    let disposed = false;
+    void api.codex.getSession(sessionId).then((info) => {
+      if (!disposed) {
+        setSession(info);
+        activeThreadIdRef.current = info.activeThreadId;
+        setMessages(info.history?.messages ?? []);
+        setActivity(info.history?.activity ?? []);
+      }
+    }).catch((error) => {
+      if (!disposed) {
+        setStatus("error");
+        setStatusText(error instanceof Error ? error.message : "读取会话失败。");
+      }
+    });
+    return () => {
+      disposed = true;
+    };
+  }, [api, sessionId]);
+
+  React.useEffect(() => {
+    if (!api || !sessionId || (!messages.length && !activity.length)) return;
+    const timeout = window.setTimeout(() => {
+      void api.codex.updateSessionHistory(sessionId, { messages, activity }).catch(() => undefined);
+    }, 250);
+    return () => window.clearTimeout(timeout);
+  }, [api, sessionId, messages, activity]);
+
+  React.useEffect(() => {
+    if (!api || startedRef.current) return;
+    startedRef.current = true;
+    void api.codex.startSession(sessionId, { initialPrompt, sandbox, approval })
+      .then(() => {
+        setStatus("running");
+        setStatusText("Codex 已连接");
+        void api.codex.listModels(sessionId).then(setModels).catch(() => undefined);
+      })
+      .catch((error) => {
+        setStatus("error");
+        setStatusText(error instanceof Error ? error.message : "Codex 启动失败。");
+      });
+  }, [api, approval, initialPrompt, sandbox, sessionId]);
+
+  React.useEffect(() => {
+    if (!api) return;
+    const off = api.events.onCodexEvent((event) => {
+      if (event.sessionId !== sessionId) return;
+      const eventThreadId = getCodexEventThreadId(event.payload);
+      if (event.kind === "thread" && eventThreadId) {
+        activeThreadIdRef.current = eventThreadId;
+        setSession((current) => current ? applyCodexThreadEventToSession(current, event.payload, eventThreadId) : current);
+      }
+      const activeThreadId = activeThreadIdRef.current;
+      if (eventThreadId && activeThreadId && eventThreadId !== activeThreadId) return;
+      applyCodexUiEvent(event.kind, event.payload, {
+        setMessages,
+        setActivity,
+        setRequests,
+        setRawEvents,
+        setStatus,
+        setStatusText
+      });
+    });
+    return off;
+  }, [api, session?.activeThreadId, sessionId]);
+
+  React.useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
+  }, [messages.length, activity.length, requests.length]);
+
+  async function saveSession() {
+    if (!api || saving || !session) return;
+    setSaving(true);
+    try {
+      await api.codex.updateSessionHistory(session.id, { messages, activity });
+      const next = await api.codex.saveSession(session.id);
+      setSession(next);
+      setStatusText("会话已保存");
+    } catch (error) {
+      setStatus("error");
+      setStatusText(error instanceof Error ? error.message : "保存会话失败。");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function stopSession() {
+    if (!api || !session) return;
+    await api.codex.stopSession(session.id);
+  }
+
+  async function newThread() {
+    if (!api || !session) return;
+    if (messages.length === 0 && activity.length === 0) {
+      setStatusText("当前 Thread 还是空的");
+      return;
+    }
+    setStatus("starting");
+    setStatusText("正在新建 Thread...");
+    try {
+      await api.codex.updateSessionHistory(session.id, { messages, activity });
+      const next = await api.codex.newThread(session.id);
+      activeThreadIdRef.current = next.activeThreadId;
+      setSession(next);
+      setMessages([]);
+      setActivity([]);
+      setRequests([]);
+      setRawEvents([]);
+      setStatus("running");
+      setStatusText("新 Thread 已创建");
+    } catch (error) {
+      setStatus("error");
+      setStatusText(error instanceof Error ? error.message : "新建 Thread 失败。");
+    }
+  }
+
+  async function openResumePicker() {
+    if (!api || !session) return;
+    setResumeBusy(true);
+    setStatusText("正在读取可恢复线程...");
+    try {
+      await api.codex.updateSessionHistory(session.id, { messages, activity });
+      const threads = await api.codex.listThreads(session.id);
+      setResumeThreads(threads);
+      setResumeIndex(0);
+      setStatusText(threads.length ? "选择要恢复的线程" : "没有找到可恢复线程");
+    } catch (error) {
+      setStatus("error");
+      setStatusText(error instanceof Error ? error.message : "读取可恢复线程失败。");
+    } finally {
+      setResumeBusy(false);
+    }
+  }
+
+  async function resumeThread(threadId: string) {
+    if (!api || !session) return;
+    setResumeBusy(true);
+    setStatus("starting");
+    setStatusText("正在切换 Thread...");
+    try {
+      const next = await api.codex.resumeThread(session.id, threadId);
+      activeThreadIdRef.current = next.activeThreadId;
+      setSession(next);
+      setMessages(next.history?.messages ?? []);
+      setActivity(next.history?.activity ?? []);
+      setRequests([]);
+      setRawEvents([]);
+      setResumeThreads([]);
+      setStatus("running");
+      setStatusText("Thread 已切换");
+    } catch (error) {
+      setStatus("error");
+      setStatusText(error instanceof Error ? error.message : "切换 Thread 失败。");
+    } finally {
+      setResumeBusy(false);
+    }
+  }
+
+  function handleComposerKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
+    if (resumeThreads.length) {
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        setResumeIndex((current) => Math.min(resumeThreads.length - 1, current + 1));
+      } else if (event.key === "ArrowUp") {
+        event.preventDefault();
+        setResumeIndex((current) => Math.max(0, current - 1));
+      } else if (event.key === "Enter") {
+        event.preventDefault();
+        const thread = resumeThreads[resumeIndex];
+        if (thread) void resumeThread(thread.id);
+      } else if (event.key === "Escape") {
+        setResumeThreads([]);
+      }
+      return;
+    }
+    if (suggestions.length) {
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        setSuggestionIndex((current) => Math.min(suggestions.length - 1, current + 1));
+      } else if (event.key === "ArrowUp") {
+        event.preventDefault();
+        setSuggestionIndex((current) => Math.max(0, current - 1));
+      } else if (event.key === "Tab" || event.key === "Enter") {
+        event.preventDefault();
+        const suggestion = suggestions[suggestionIndex] ?? suggestions[0];
+        if (suggestion) {
+          setInput(suggestion.value);
+          setInputHistoryIndex(null);
+        }
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        setInput("");
+      }
+      return;
+    }
+    if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+      const next = getNextCodexInputHistory(inputHistory, inputHistoryIndex, event.key === "ArrowUp" ? -1 : 1);
+      if (next) {
+        event.preventDefault();
+        setInputHistoryIndex(next.index);
+        setInput(next.value);
+      }
+    }
+  }
+
+  async function sendMessage(event: React.FormEvent) {
+    event.preventDefault();
+    const text = input.trim();
+    if (!api || !text) return;
+    setInput("");
+    rememberCodexInput(text, setInputHistory);
+    setInputHistoryIndex(null);
+    try {
+      if (text === "/resume") {
+        await openResumePicker();
+        return;
+      }
+      const handledCommand = await handleLocalCodexCommand({
+        api,
+        session,
+        text,
+        models,
+        setSession: (next) => setSession(next),
+        setStatusText
+      });
+      if (handledCommand) return;
+      await api.codex.sendInput(sessionId, text);
+    } catch (error) {
+      setStatus("error");
+      setStatusText(error instanceof Error ? error.message : "发送失败。");
+    }
+  }
+
+  async function resolveRequest(requestId: number | string, response: unknown) {
+    if (!api) return;
+    await api.codex.respondRequest(sessionId, requestId, response);
+    setRequests((current) => current.filter((request) => request.id !== requestId));
+  }
+
+  return (
+    <main className="codex-window" style={themeStyle}>
+      <header className="codex-window-header">
+        <div>
+          <strong>Linnea Codex</strong>
+          <span>{session?.workspacePath ?? "加载工作目录..."}</span>
+        </div>
+        <div className={`codex-status ${status}`}>{statusText}</div>
+        <CodexThreadBadges settings={activeSettings} models={models} />
+      </header>
+      <section className="codex-window-body">
+        <aside className="codex-session-panel">
+          <strong>副本文件</strong>
+          <div className="codex-session-items">
+            {session?.copiedItems.map((item) => (
+              <div key={item.copiedPath}>
+                <FileText size={13} />
+                <span>{item.copiedName}</span>
+              </div>
+            )) ?? <span>加载中...</span>}
+          </div>
+          <div className="codex-session-meta">
+            <span>Sandbox: {sandbox}</span>
+            <span>Approval: {approval}</span>
+            {session?.savedPath && <span>已保存: {session.savedPath}</span>}
+          </div>
+          <button type="button" onClick={() => session && void api?.codex.openWorkspace(session.id)} disabled={!session}>
+            <FolderOpen size={14} /> 打开目录
+          </button>
+          <button type="button" onClick={() => void saveSession()} disabled={!session || session.saved || saving}>
+            <Save size={14} /> {session?.saved ? "已保存" : saving ? "保存中..." : "保存会话"}
+          </button>
+          <button type="button" onClick={() => void openResumePicker()} disabled={!session || status === "starting"}>
+            <ListTodo size={14} /> 线程
+          </button>
+          <button type="button" onClick={() => void newThread()} disabled={!session || status === "starting"}>
+            <Sparkles size={14} /> 新建 Thread
+          </button>
+          <button type="button" onClick={() => void stopSession()} disabled={!session || status !== "running"}>
+            <Square size={14} /> 停止
+          </button>
+        </aside>
+        <section className="codex-conversation">
+          <div className="codex-message-list">
+            {messages.length === 0 && activity.length === 0 && <div className="codex-empty">Codex 正在准备会话。</div>}
+            {messages.map((message) => (
+              <div key={message.id} className={`codex-chat-message ${message.role}`}>
+                <strong>{message.role === "user" ? "你" : message.role === "assistant" ? "Codex" : "系统"}</strong>
+                <MarkdownText text={message.text} />
+              </div>
+            ))}
+            {requests.map((request) => (
+              <CodexRequestCard key={request.id} request={request} onResolve={(response) => void resolveRequest(request.id, response)} />
+            ))}
+            <details className="codex-activity-log">
+              <summary>活动详情 {activity.length ? `(${activity.length})` : ""}</summary>
+              <div>
+                {activity.length === 0 ? <span>暂无命令或文件活动。</span> : activity.map((item) => (
+                  <div key={item.id} className={`codex-activity ${item.type}`}>
+                    <strong>{item.title}</strong>
+                    {item.status && <span>{item.status}</span>}
+                    {item.text && <pre>{item.text}</pre>}
+                  </div>
+                ))}
+              </div>
+            </details>
+            <details className="codex-raw-log">
+              <summary>调试事件</summary>
+              <pre>{rawEvents.slice(-40).join("\n\n")}</pre>
+            </details>
+            <div ref={messagesEndRef} aria-hidden="true" />
+          </div>
+          <form className="codex-composer" onSubmit={sendMessage}>
+            {resumeThreads.length > 0 && (
+              <CodexResumePicker
+                threads={resumeThreads}
+                busy={resumeBusy}
+                activeIndex={resumeIndex}
+                onHover={setResumeIndex}
+                onResume={(threadId) => void resumeThread(threadId)}
+                onClose={() => setResumeThreads([])}
+              />
+            )}
+            {suggestions.length > 0 && (
+              <CodexSuggestionPicker
+                suggestions={suggestions}
+                activeIndex={suggestionIndex}
+                onHover={setSuggestionIndex}
+                onApply={(suggestion) => {
+                  setInput(suggestion.value);
+                  setInputHistoryIndex(null);
+                }}
+              />
+            )}
+            <div>
+              <input value={input} onKeyDown={handleComposerKeyDown} onChange={(event) => {
+                setInput(event.target.value);
+                setInputHistoryIndex(null);
+              }} placeholder="输入指令，支持 /model、/review、/compact、@文件名..." />
+              <button type="submit" disabled={!input.trim() || status === "error"}>
+                <Send size={16} />
+              </button>
+            </div>
+          </form>
+        </section>
+      </section>
+    </main>
+  );
+}
+
+function CodexEmbeddedConversation({
+  api,
+  sessionInfo,
+  sandbox,
+  approval,
+  onSessionChange
+}: {
+  api?: DesktopPetApi;
+  sessionInfo: CodexSessionInfo;
+  sandbox: CodexSandboxPolicy;
+  approval: CodexApprovalPolicy;
+  onSessionChange(session: CodexSessionInfo): void;
+}) {
+  const startedRef = React.useRef(false);
+  const messagesEndRef = React.useRef<HTMLDivElement | null>(null);
+  const activeThreadIdRef = React.useRef<string | undefined>(sessionInfo.activeThreadId);
+  const [session, setSession] = React.useState(sessionInfo);
+  const [status, setStatus] = React.useState<"starting" | "running" | "exited" | "error">("starting");
+  const [statusText, setStatusText] = React.useState("Codex 未启动");
+  const [input, setInput] = React.useState("");
+  const [inputHistory, setInputHistory] = React.useState<string[]>([]);
+  const [inputHistoryIndex, setInputHistoryIndex] = React.useState<number | null>(null);
+  const [messages, setMessages] = React.useState<CodexUiMessage[]>(sessionInfo.history?.messages ?? []);
+  const [activity, setActivity] = React.useState<CodexUiActivity[]>(sessionInfo.history?.activity ?? []);
+  const [requests, setRequests] = React.useState<Array<{ id: number | string; method: string; params: any }>>([]);
+  const [rawEvents, setRawEvents] = React.useState<string[]>([]);
+  const [models, setModels] = React.useState<CodexModelSummary[]>([]);
+  const [resumeThreads, setResumeThreads] = React.useState<CodexThreadSummary[]>([]);
+  const [resumeBusy, setResumeBusy] = React.useState(false);
+  const [resumeIndex, setResumeIndex] = React.useState(0);
+  const [suggestionIndex, setSuggestionIndex] = React.useState(0);
+  const suggestions = getCodexInputSuggestions(input, session, models);
+  const activeSettings = getCodexActiveThreadSettings(session);
+
+  React.useEffect(() => {
+    setSuggestionIndex(0);
+  }, [input, suggestions.length]);
+
+  React.useEffect(() => {
+    setSession(sessionInfo);
+    activeThreadIdRef.current = sessionInfo.activeThreadId;
+    setMessages(sessionInfo.history?.messages ?? []);
+    setActivity(sessionInfo.history?.activity ?? []);
+    setRequests([]);
+    setRawEvents([]);
+    setStatus("starting");
+    setStatusText("Codex 未启动");
+    startedRef.current = false;
+  }, [sessionInfo.id]);
+
+  React.useEffect(() => {
+    if (!api || startedRef.current) return;
+    startedRef.current = true;
+    void api.codex.startSession(session.id, { sandbox, approval })
+      .then(() => {
+        setStatus("running");
+        setStatusText("Codex 已连接");
+        void api.codex.listModels(session.id).then(setModels).catch(() => undefined);
+      })
+      .catch((error) => {
+        setStatus("error");
+        setStatusText(error instanceof Error ? error.message : "Codex 启动失败。");
+      });
+  }, [api, approval, sandbox, session.id]);
+
+  React.useEffect(() => {
+    if (!api || (!messages.length && !activity.length)) return;
+    const timeout = window.setTimeout(() => {
+      void api.codex.updateSessionHistory(session.id, { messages, activity }).catch(() => undefined);
+    }, 250);
+    return () => window.clearTimeout(timeout);
+  }, [api, session.id, messages, activity]);
+
+  React.useEffect(() => {
+    if (!api) return;
+    const off = api.events.onCodexEvent((event) => {
+      if (event.sessionId !== session.id) return;
+      const eventThreadId = getCodexEventThreadId(event.payload);
+      if (event.kind === "thread" && eventThreadId) {
+        activeThreadIdRef.current = eventThreadId;
+        setSession((current) => applyCodexThreadEventToSession(current, event.payload, eventThreadId));
+      }
+      const activeThreadId = activeThreadIdRef.current;
+      if (eventThreadId && activeThreadId && eventThreadId !== activeThreadId) return;
+      applyCodexUiEvent(event.kind, event.payload, {
+        setMessages,
+        setActivity,
+        setRequests,
+        setRawEvents,
+        setStatus,
+        setStatusText
+      });
+    });
+    return off;
+  }, [api, session.id]);
+
+  React.useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
+  }, [messages.length, activity.length, requests.length]);
+
+  async function sendMessage(event: React.FormEvent) {
+    event.preventDefault();
+    const text = input.trim();
+    if (!api || !text) return;
+    setInput("");
+    rememberCodexInput(text, setInputHistory);
+    setInputHistoryIndex(null);
+    try {
+      if (text === "/resume") {
+        await openResumePicker();
+        return;
+      }
+      const handledCommand = await handleLocalCodexCommand({
+        api,
+        session,
+        text,
+        models,
+        setSession: (next) => setSession(next),
+        setStatusText
+      });
+      if (handledCommand) return;
+      if (status !== "running") {
+        setStatus("starting");
+        setStatusText("正在重新连接 Codex...");
+        await api.codex.startSession(session.id, { sandbox, approval });
+        setStatus("running");
+        setStatusText("Codex 已连接");
+      }
+      await api.codex.sendInput(session.id, text);
+    } catch (error) {
+      setStatus("error");
+      setStatusText(error instanceof Error ? error.message : "发送失败。");
+    }
+  }
+
+  async function openResumePicker() {
+    if (!api) return;
+    setResumeBusy(true);
+    setStatusText("正在读取可恢复线程...");
+    try {
+      await api.codex.updateSessionHistory(session.id, { messages, activity });
+      const threads = await api.codex.listThreads(session.id);
+      setResumeThreads(threads);
+      setResumeIndex(0);
+      setStatusText(threads.length ? "选择要恢复的线程" : "没有找到可恢复线程");
+    } catch (error) {
+      setStatus("error");
+      setStatusText(error instanceof Error ? error.message : "读取可恢复线程失败。");
+    } finally {
+      setResumeBusy(false);
+    }
+  }
+
+  async function resumeThread(threadId: string) {
+    if (!api) return;
+    setResumeBusy(true);
+    setStatus("starting");
+    setStatusText("正在恢复线程...");
+    try {
+      const next = await api.codex.resumeThread(session.id, threadId);
+      activeThreadIdRef.current = next.activeThreadId;
+      setSession(next);
+      setMessages(next.history?.messages ?? []);
+      setActivity(next.history?.activity ?? []);
+      setRequests([]);
+      setRawEvents([]);
+      setResumeThreads([]);
+      setStatus("running");
+      setStatusText("线程已恢复");
+    } catch (error) {
+      setStatus("error");
+      setStatusText(error instanceof Error ? error.message : "恢复线程失败。");
+    } finally {
+      setResumeBusy(false);
+    }
+  }
+
+  function handleComposerKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
+    if (resumeThreads.length) {
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        setResumeIndex((current) => Math.min(resumeThreads.length - 1, current + 1));
+      } else if (event.key === "ArrowUp") {
+        event.preventDefault();
+        setResumeIndex((current) => Math.max(0, current - 1));
+      } else if (event.key === "Enter") {
+        event.preventDefault();
+        const thread = resumeThreads[resumeIndex];
+        if (thread) void resumeThread(thread.id);
+      } else if (event.key === "Escape") {
+        setResumeThreads([]);
+      }
+      return;
+    }
+    if (suggestions.length) {
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        setSuggestionIndex((current) => Math.min(suggestions.length - 1, current + 1));
+      } else if (event.key === "ArrowUp") {
+        event.preventDefault();
+        setSuggestionIndex((current) => Math.max(0, current - 1));
+      } else if (event.key === "Tab" || event.key === "Enter") {
+        event.preventDefault();
+        const suggestion = suggestions[suggestionIndex] ?? suggestions[0];
+        if (suggestion) {
+          setInput(suggestion.value);
+          setInputHistoryIndex(null);
+        }
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        setInput("");
+      }
+      return;
+    }
+    if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+      const next = getNextCodexInputHistory(inputHistory, inputHistoryIndex, event.key === "ArrowUp" ? -1 : 1);
+      if (next) {
+        event.preventDefault();
+        setInputHistoryIndex(next.index);
+        setInput(next.value);
+      }
+    }
+  }
+
+  async function resolveRequest(requestId: number | string, response: unknown) {
+    if (!api) return;
+    await api.codex.respondRequest(session.id, requestId, response);
+    setRequests((current) => current.filter((request) => request.id !== requestId));
+  }
+
+  async function openWorkspace() {
+    if (!api) return;
+    await api.codex.openWorkspace(session.id);
+  }
+
+  async function newThread() {
+    if (!api) return;
+    if (messages.length === 0 && activity.length === 0) {
+      setStatusText("当前 Thread 还是空的");
+      return;
+    }
+    setStatus("starting");
+    setStatusText("正在新建 Thread...");
+    try {
+      await api.codex.updateSessionHistory(session.id, { messages, activity });
+      const next = await api.codex.newThread(session.id);
+      activeThreadIdRef.current = next.activeThreadId;
+      setSession(next);
+      setMessages([]);
+      setActivity([]);
+      setRequests([]);
+      setRawEvents([]);
+      setResumeThreads([]);
+      setStatus("running");
+      setStatusText("新 Thread 已创建");
+    } catch (error) {
+      setStatus("error");
+      setStatusText(error instanceof Error ? error.message : "新建 Thread 失败。");
+    }
+  }
+
+  async function stopSession() {
+    if (!api) return;
+    await api.codex.stopSession(session.id);
+    setStatus("exited");
+    setStatusText("Codex 已停止");
+  }
+
+  React.useEffect(() => {
+    onSessionChange({ ...session, history: { messages, activity } });
+  }, [activity, messages, onSessionChange, session]);
+
+  return (
+    <div className="codex-embedded">
+      <header className="codex-embedded-header">
+        <div>
+          <strong>{session.copiedItems[0]?.copiedName ?? "Codex 对话"}</strong>
+          <span>{session.workspacePath}</span>
+        </div>
+        <div className="codex-embedded-actions">
+          <CodexThreadBadges settings={activeSettings} models={models} />
+          <button type="button" onClick={() => void openWorkspace()}><FolderOpen size={14} /> 打开目录</button>
+          <button type="button" onClick={() => void openResumePicker()} disabled={status === "starting"}><ListTodo size={14} /> 线程</button>
+          <button type="button" onClick={() => void newThread()} disabled={status === "starting"}><Sparkles size={14} /> 新建 Thread</button>
+          <button type="button" onClick={() => void stopSession()} disabled={status !== "running"}><Square size={14} /> 停止</button>
+          <span className={`codex-status ${status}`}>{statusText}</span>
+        </div>
+      </header>
+      <div className="codex-message-list">
+        {messages.length === 0 && activity.length === 0 && <div className="codex-empty">输入指令后开始和 Codex 对话。</div>}
+        {messages.map((message) => (
+          <div key={message.id} className={`codex-chat-message ${message.role}`}>
+            <strong>{message.role === "user" ? "你" : message.role === "assistant" ? "Codex" : "系统"}</strong>
+            <MarkdownText text={message.text} />
+          </div>
+        ))}
+        {requests.map((request) => (
+          <CodexRequestCard key={request.id} request={request} onResolve={(response) => void resolveRequest(request.id, response)} />
+        ))}
+        <details className="codex-activity-log">
+          <summary>活动详情 {activity.length ? `(${activity.length})` : ""}</summary>
+          <div>
+            {activity.length === 0 ? <span>暂无命令或文件活动。</span> : activity.map((item) => (
+              <div key={item.id} className={`codex-activity ${item.type}`}>
+                <strong>{item.title}</strong>
+                {item.status && <span>{item.status}</span>}
+                {item.text && <pre>{item.text}</pre>}
+              </div>
+            ))}
+          </div>
+        </details>
+        <details className="codex-raw-log">
+          <summary>调试事件</summary>
+          <pre>{rawEvents.slice(-40).join("\n\n")}</pre>
+        </details>
+        <div ref={messagesEndRef} aria-hidden="true" />
+      </div>
+      <form className="codex-composer" onSubmit={sendMessage}>
+        {resumeThreads.length > 0 && (
+          <CodexResumePicker
+            threads={resumeThreads}
+            busy={resumeBusy}
+            activeIndex={resumeIndex}
+            onHover={setResumeIndex}
+            onResume={(threadId) => void resumeThread(threadId)}
+            onClose={() => setResumeThreads([])}
+          />
+        )}
+        {suggestions.length > 0 && (
+          <CodexSuggestionPicker
+            suggestions={suggestions}
+            activeIndex={suggestionIndex}
+            onHover={setSuggestionIndex}
+            onApply={(suggestion) => {
+              setInput(suggestion.value);
+              setInputHistoryIndex(null);
+            }}
+          />
+        )}
+        <div>
+          <input value={input} onKeyDown={handleComposerKeyDown} onChange={(event) => {
+            setInput(event.target.value);
+            setInputHistoryIndex(null);
+          }} placeholder="输入指令，支持 /model、/review、/compact、@文件名..." />
+          <button type="submit" disabled={!input.trim() || status === "starting"}>
+            <Send size={16} />
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+type CodexInputSuggestion = {
+  value: string;
+  label: string;
+  description?: string;
+};
+
+function CodexSuggestionPicker({
+  suggestions,
+  activeIndex,
+  onHover,
+  onApply
+}: {
+  suggestions: CodexInputSuggestion[];
+  activeIndex: number;
+  onHover(index: number): void;
+  onApply(suggestion: CodexInputSuggestion): void;
+}) {
+  return (
+    <div className="codex-suggestions">
+      <div className="codex-suggestions-header">
+        <div>
+          <strong>指令补全</strong>
+          <span>{suggestions.length} 个匹配项，使用 ↑ ↓ 选择，Tab 或 Enter 补全。</span>
+        </div>
+      </div>
+      <div className="codex-suggestions-list">
+        {suggestions.map((suggestion, index) => (
+          <button
+            key={`${suggestion.value}-${index}`}
+            type="button"
+            className={index === activeIndex ? "active" : ""}
+            onMouseEnter={() => onHover(index)}
+            onClick={() => onApply(suggestion)}
+          >
+            <span aria-hidden="true" className="codex-suggestion-marker">{index === activeIndex ? <Check size={12} /> : null}</span>
+            <span className="codex-suggestion-main">
+              <strong>{suggestion.label}</strong>
+              {suggestion.description && <span>{suggestion.description}</span>}
+            </span>
+          </button>
+        ))}
+      </div>
+      <div className="codex-suggestions-footer">
+        <span>Tab 补全</span>
+        <span>Enter 补全当前项</span>
+      </div>
+    </div>
+  );
+}
+
+function CodexResumePicker({
+  threads,
+  busy,
+  activeIndex,
+  onHover,
+  onResume,
+  onClose
+}: {
+  threads: CodexThreadSummary[];
+  busy: boolean;
+  activeIndex: number;
+  onHover(index: number): void;
+  onResume(threadId: string): void;
+  onClose(): void;
+}) {
+  return (
+    <div className="codex-resume-picker">
+      <div className="codex-resume-picker-header">
+        <div>
+          <strong>恢复 Codex 线程</strong>
+          <span>{threads.length} 个可恢复线程，使用 ↑ ↓ 选择，Enter 恢复。</span>
+        </div>
+        <button type="button" onClick={onClose} aria-label="关闭恢复列表">
+          <X size={13} />
+        </button>
+      </div>
+      <div className="codex-resume-picker-list">
+        {threads.map((thread, index) => {
+          const title = thread.name || thread.preview || thread.id;
+          const updatedAt = new Date((thread.updatedAt || thread.createdAt) * 1000).toLocaleString();
+          return (
+            <button
+              key={thread.id}
+              type="button"
+              className={index === activeIndex ? "active" : ""}
+              onMouseEnter={() => onHover(index)}
+              onClick={() => onResume(thread.id)}
+              disabled={busy}
+            >
+              <span aria-hidden="true" className="codex-resume-marker">{index === activeIndex ? <Check size={12} /> : null}</span>
+              <span className="codex-resume-main">
+                <span className="codex-resume-title-row">
+                  <strong>{title}</strong>
+                  <small>{updatedAt}</small>
+                </span>
+                {thread.preview && thread.preview !== title && <span className="codex-resume-preview">{thread.preview}</span>}
+                <span className="codex-resume-path">{thread.cwd}</span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      <div className="codex-resume-picker-footer">
+        <span>Esc 关闭</span>
+        <span>{busy ? "正在恢复..." : "点击任意线程继续"}</span>
+      </div>
+    </div>
+  );
+}
+
+function CodexThreadBadges({ settings, models }: { settings: CodexThreadSettings; models: CodexModelSummary[] }) {
+  const model = settings.model;
+  const modelLabel = model ? getCodexModelLabel(model, models) : "默认模型";
+  return (
+    <div className="codex-thread-badges">
+      <span>{modelLabel}</span>
+      {settings.reasoningEffort && <span>{settings.reasoningEffort}</span>}
+      <span>{settings.mode === "plan" ? "Plan" : "Default"}</span>
+    </div>
+  );
+}
+
+function getCodexActiveThreadSettings(session: CodexSessionInfo | null): CodexThreadSettings {
+  if (!session) return {};
+  const threadId = session.activeThreadId;
+  return (threadId ? session.threads?.[threadId]?.settings : undefined) ?? session.history?.settings ?? {};
+}
+
+function applyCodexThreadEventToSession(session: CodexSessionInfo, payload: unknown, threadId: string): CodexSessionInfo {
+  const value = payload as any;
+  if (value?.type !== "threadSettings") return { ...session, activeThreadId: threadId };
+  const settings = sanitizeClientCodexThreadSettings(value.settings);
+  const threads = { ...(session.threads ?? {}) };
+  const history = threads[threadId] ?? session.history ?? { messages: [], activity: [] };
+  threads[threadId] = { ...history, settings };
+  return {
+    ...session,
+    activeThreadId: threadId,
+    history: threadId === session.activeThreadId || !session.activeThreadId ? threads[threadId] : session.history,
+    threads
+  };
+}
+
+function sanitizeClientCodexThreadSettings(value: unknown): CodexThreadSettings | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const input = value as Partial<CodexThreadSettings>;
+  const settings: CodexThreadSettings = {};
+  if (typeof input.model === "string" && input.model.trim()) settings.model = input.model.trim();
+  if (isCodexReasoningEffort(input.reasoningEffort)) settings.reasoningEffort = input.reasoningEffort;
+  if (input.mode === "plan") settings.mode = "plan";
+  return Object.keys(settings).length ? settings : undefined;
+}
+
+async function handleLocalCodexCommand({
+  api,
+  session,
+  text,
+  models,
+  setSession,
+  setStatusText
+}: {
+  api: DesktopPetApi;
+  session: CodexSessionInfo | null;
+  text: string;
+  models: CodexModelSummary[];
+  setSession(session: CodexSessionInfo): void;
+  setStatusText: React.Dispatch<React.SetStateAction<string>>;
+}) {
+  if (!session) return false;
+  const [command, ...parts] = text.split(/\s+/);
+  if (command === "/model") {
+    if (!parts.length) {
+      setStatusText("请选择模型，或输入 /model <model> [effort]");
+      return true;
+    }
+    const model = parts[0];
+    const effort = parts.find(isCodexReasoningEffort);
+    const selected = models.find((item) => item.id === model || item.displayName === model);
+    const next = await api.codex.setThreadSettings(session.id, {
+      model: selected?.id ?? model,
+      ...(effort ? { reasoningEffort: effort } : {})
+    });
+    setSession(next);
+    setStatusText(`当前 Thread 已切换到 ${getCodexModelLabel(selected?.id ?? model, models)}${effort ? ` / ${effort}` : ""}`);
+    return true;
+  }
+  if (command === "/plan") {
+    const current = getCodexActiveThreadSettings(session);
+    const explicit = parts[0]?.toLowerCase();
+    const mode = explicit === "off" || explicit === "default" || explicit === "false"
+      ? "default"
+      : current.mode === "plan" && (explicit === "toggle" || !explicit)
+        ? "default"
+        : "plan";
+    const next = await api.codex.setThreadSettings(session.id, { mode });
+    setSession(next);
+    setStatusText(mode === "plan" ? "当前 Thread 已进入 Plan 模式" : "当前 Thread 已退出 Plan 模式");
+    return true;
+  }
+  return false;
+}
+
+function isCodexReasoningEffort(value: unknown): value is CodexReasoningEffort {
+  return value === "none" || value === "minimal" || value === "low" || value === "medium" || value === "high" || value === "xhigh";
+}
+
+function getCodexModelLabel(modelId: string, models: CodexModelSummary[]) {
+  const model = models.find((item) => item.id === modelId);
+  return model?.displayName ? `${model.displayName}` : modelId;
+}
+
+function rememberCodexInput(text: string, setHistory: React.Dispatch<React.SetStateAction<string[]>>) {
+  setHistory((current) => {
+    const deduped = current.filter((item) => item !== text);
+    return [...deduped, text].slice(-80);
+  });
+}
+
+function getNextCodexInputHistory(history: string[], currentIndex: number | null, direction: -1 | 1) {
+  if (!history.length) return null;
+  if (currentIndex === null) {
+    if (direction === 1) return null;
+    const index = direction === -1 ? history.length - 1 : 0;
+    return { index, value: history[index] };
+  }
+  if (direction === 1 && currentIndex >= history.length - 1) {
+    return { index: null, value: "" };
+  }
+  const index = Math.min(history.length - 1, Math.max(0, currentIndex + direction));
+  return { index, value: history[index] };
+}
+
+function applyCodexUiEvent(
+  kind: string,
+  payload: any,
+  state: {
+    setMessages: React.Dispatch<React.SetStateAction<CodexUiMessage[]>>;
+    setActivity: React.Dispatch<React.SetStateAction<CodexUiActivity[]>>;
+    setRequests: React.Dispatch<React.SetStateAction<Array<{ id: number | string; method: string; params: any }>>>;
+    setRawEvents: React.Dispatch<React.SetStateAction<string[]>>;
+    setStatus: React.Dispatch<React.SetStateAction<"starting" | "running" | "exited" | "error">>;
+    setStatusText: React.Dispatch<React.SetStateAction<string>>;
+  }
+) {
+  const method = payload?.method;
+  state.setRawEvents((current) => [...current.slice(-80), JSON.stringify(payload)]);
+  if (kind === "request") {
+    state.setRequests((current) => [...current, { id: payload.id, method, params: payload.params }]);
+    return;
+  }
+  if (kind === "error") {
+    state.setStatus("error");
+    state.setStatusText(payload?.params?.message ?? payload?.message ?? "Codex 出错");
+    return;
+  }
+  if (method === "thread/status/changed") {
+    const status = payload.params?.status?.type ?? "running";
+    state.setStatus(status === "idle" ? "running" : "running");
+    state.setStatusText(status === "idle" ? "Codex 空闲" : "Codex 正在处理");
+    return;
+  }
+  if (kind === "thread") {
+    state.setStatus("running");
+    state.setStatusText("Codex 已连接");
+    return;
+  }
+  if (kind === "status") {
+    const status = payload?.status;
+    if (status === "startingAppServer") state.setStatusText("正在启动 Codex app-server...");
+    else if (status === "connected") state.setStatusText("正在连接 Codex...");
+    else if (status === "socketClosed") {
+      state.setStatus("exited");
+      state.setStatusText("Codex 连接已关闭");
+    } else if (status === "stopped") {
+      state.setStatus("exited");
+      state.setStatusText("Codex 已停止");
+    }
+    else if (status === "exited") {
+      state.setStatus("exited");
+      state.setStatusText("Codex app-server 已退出");
+    }
+    return;
+  }
+  if (method === "item/started" || method === "item/completed") {
+    const item = payload.params?.item;
+    if (!item?.id) return;
+    if (item.type === "userMessage") {
+      const text = stripCodexPlanModeInstruction((item.content ?? []).map((part: any) => part.text).filter(Boolean).join("\n"));
+      upsertCodexMessage(state.setMessages, item.id, "user", text);
+    } else if (item.type === "agentMessage") {
+      upsertCodexMessage(state.setMessages, item.id, "assistant", item.text ?? "");
+    } else if (item.type === "commandExecution") {
+      upsertCodexActivity(state.setActivity, item.id, "command", `命令：${item.command}`, item.aggregatedOutput ?? "", item.status);
+    } else if (item.type === "fileChange") {
+      upsertCodexActivity(state.setActivity, item.id, "file", "文件变更", JSON.stringify(item.changes ?? [], null, 2), item.status);
+    } else if (item.type === "plan") {
+      upsertCodexActivity(state.setActivity, item.id, "plan", "计划", item.text ?? "", method === "item/completed" ? "完成" : "更新中");
+    } else if (item.type === "reasoning") {
+      const text = [...(item.summary ?? []), ...(item.content ?? [])].join("\n");
+      upsertCodexActivity(state.setActivity, item.id, "reasoning", "推理过程", text, method === "item/completed" ? "完成" : "思考中");
+    } else {
+      upsertCodexActivity(state.setActivity, item.id, item.type, item.type, JSON.stringify(item, null, 2), method === "item/completed" ? "完成" : "进行中");
+    }
+    return;
+  }
+  if (method === "item/agentMessage/delta") {
+    appendCodexMessage(state.setMessages, payload.params.itemId, "assistant", payload.params.delta ?? "");
+  } else if (method === "item/commandExecution/outputDelta" || method === "command/exec/outputDelta") {
+    appendCodexActivity(state.setActivity, payload.params.itemId ?? payload.params.commandId ?? crypto.randomUUID(), "command", "命令输出", payload.params.delta ?? "");
+  } else if (method === "item/fileChange/patchUpdated") {
+    upsertCodexActivity(state.setActivity, payload.params.itemId, "file", "文件变更", JSON.stringify(payload.params.changes ?? [], null, 2), "待确认");
+  } else if (method === "turn/completed") {
+    state.setStatusText("Codex 空闲");
+  }
+}
+
+function stripCodexPlanModeInstruction(text: string) {
+  const prefix = "Plan mode is enabled for this thread. First produce a concise implementation plan and do not modify files or run mutating commands unless the user explicitly asks you to proceed.\n\n";
+  return text.startsWith(prefix) ? text.slice(prefix.length) : text;
+}
+
+function getCodexEventThreadId(payload: unknown) {
+  const value = payload as any;
+  if (typeof value?.params?.threadId === "string") return value.params.threadId;
+  if (typeof value?.threadId === "string") return value.threadId;
+  if (typeof value?.thread?.id === "string") return value.thread.id;
+  return undefined;
+}
+
+function upsertCodexMessage(setter: React.Dispatch<React.SetStateAction<CodexUiMessage[]>>, id: string, role: "user" | "assistant" | "system", text: string) {
+  setter((current) => current.some((item) => item.id === id)
+    ? current.map((item) => item.id === id ? { ...item, role, text } : item)
+    : [...current, { id, role, text }]);
+}
+
+function appendCodexMessage(setter: React.Dispatch<React.SetStateAction<CodexUiMessage[]>>, id: string, role: "user" | "assistant" | "system", delta: string) {
+  setter((current) => current.some((item) => item.id === id)
+    ? current.map((item) => item.id === id ? { ...item, text: item.text + delta } : item)
+    : [...current, { id, role, text: delta }]);
+}
+
+function upsertCodexActivity(setter: React.Dispatch<React.SetStateAction<CodexUiActivity[]>>, id: string, type: string, title: string, text: string, status?: string) {
+  setter((current) => current.some((item) => item.id === id)
+    ? current.map((item) => item.id === id ? { ...item, type, title, text, status } : item)
+    : [...current, { id, type, title, text, status }]);
+}
+
+function appendCodexActivity(setter: React.Dispatch<React.SetStateAction<CodexUiActivity[]>>, id: string, type: string, title: string, delta: string) {
+  setter((current) => current.some((item) => item.id === id)
+    ? current.map((item) => item.id === id ? { ...item, text: item.text + delta } : item)
+    : [...current, { id, type, title, text: delta, status: "运行中" }]);
+}
+
+function CodexRequestCard({ request, onResolve }: { request: { id: number | string; method: string; params: any }; onResolve(response: unknown): void }) {
+  const command = request.params?.command;
+  const reason = request.params?.reason;
+  const isFileChange = request.method === "item/fileChange/requestApproval";
+  const isPermissions = request.method === "item/permissions/requestApproval";
+  function accept() {
+    if (request.method === "item/commandExecution/requestApproval") onResolve({ decision: "accept" });
+    else if (isFileChange) onResolve({ decision: "accept" });
+    else if (isPermissions) onResolve({ permissions: request.params?.permissions ?? { type: "none" }, scope: "turn" });
+    else onResolve({ action: "accept" });
+  }
+  function acceptForSession() {
+    if (request.method === "item/commandExecution/requestApproval") onResolve({ decision: "acceptForSession" });
+    else if (isFileChange) onResolve({ decision: "acceptForSession" });
+    else accept();
+  }
+  function decline() {
+    if (request.method === "item/commandExecution/requestApproval" || isFileChange) onResolve({ decision: "decline" });
+    else onResolve({ action: "decline" });
+  }
+  return (
+    <div className="codex-request-card">
+      <strong>{isFileChange ? "允许文件变更？" : isPermissions ? "权限请求" : "允许执行命令？"}</strong>
+      {reason && <p>{reason}</p>}
+      {command && <pre>{command}</pre>}
+      {request.params?.cwd && <span>{request.params.cwd}</span>}
+      <div>
+        <button type="button" onClick={accept}>允许</button>
+        <button type="button" onClick={acceptForSession}>本会话允许</button>
+        <button type="button" onClick={decline}>拒绝</button>
+      </div>
+    </div>
+  );
+}
+
+function getCodexInputSuggestions(input: string, session: CodexSessionInfo | null, models: CodexModelSummary[]): CodexInputSuggestion[] {
+  if (input.startsWith("/")) {
+    const normalized = input.toLowerCase();
+    const commandSuggestions = codexSlashCommands
+      .filter((command) => command.command.startsWith(normalized))
+      .map((command) => ({
+        value: command.command,
+        label: command.command,
+        description: command.description
+      }));
+    if (normalized.startsWith("/model")) {
+      const modelPrefix = input.slice("/model".length).trim().toLowerCase();
+      const matchingModels = models
+        .filter((model) => !model.hidden)
+        .filter((model) => {
+          const modelName = model.displayName ?? "";
+          return model.id.toLowerCase().includes(modelPrefix) || modelName.toLowerCase().includes(modelPrefix);
+        })
+        .slice(0, 8);
+      const modelSuggestions = matchingModels.map((model) => ({
+          value: `/model ${model.id}${model.defaultReasoningEffort ? ` ${model.defaultReasoningEffort}` : ""}`,
+          label: model.displayName ? `${model.displayName} (${model.id})` : model.id,
+          description: model.isDefault ? "默认模型" : model.defaultReasoningEffort ? `默认推理强度: ${model.defaultReasoningEffort}` : "模型"
+        }));
+      return [...modelSuggestions, ...commandSuggestions].slice(0, 8);
+    }
+    return commandSuggestions.slice(0, 8);
+  }
+  if (input.includes("@")) {
+    const prefix = input.slice(input.lastIndexOf("@") + 1).toLowerCase();
+    return (session?.copiedItems ?? [])
+      .map((item) => ({
+        value: `${input.slice(0, input.lastIndexOf("@"))}@${item.copiedName}`,
+        label: item.copiedName,
+        description: item.path
+      }))
+      .filter((item) => item.value.toLowerCase().includes(prefix))
+      .slice(0, 6);
+  }
+  return [];
+}
+
+function MarkdownText({ text }: { text: string }) {
+  const blocks = React.useMemo(() => parseMarkdownBlocks(text), [text]);
+  return (
+    <div className="codex-markdown">
+      {blocks.map((block, index) => {
+        if (block.type === "code") {
+          return (
+            <figure key={index} className="codex-code-block">
+              {block.language && <figcaption>{block.language}</figcaption>}
+              <pre><code>{block.text}</code></pre>
+            </figure>
+          );
+        }
+        if (block.type === "heading") {
+          const Heading = `h${Math.min(3, block.level)}` as "h1" | "h2" | "h3";
+          return <Heading key={index}>{renderCodexInlineMarkdown(block.text)}</Heading>;
+        }
+        if (block.type === "quote") return <blockquote key={index}>{renderCodexInlineMarkdown(block.text)}</blockquote>;
+        if (block.type === "table") {
+          return (
+            <div key={index} className="codex-table-wrap">
+              <table>
+                <tbody>
+                  {block.rows.map((row, rowIndex) => (
+                    <tr key={rowIndex}>
+                      {row.map((cell, cellIndex) => rowIndex === 0
+                        ? <th key={cellIndex}>{renderCodexInlineMarkdown(cell)}</th>
+                        : <td key={cellIndex}>{renderCodexInlineMarkdown(cell)}</td>)}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          );
+        }
+        if (block.type === "list") {
+          return (
+            <ul key={index}>
+              {block.items.map((item, itemIndex) => <li key={itemIndex}>{renderCodexInlineMarkdown(item)}</li>)}
+            </ul>
+          );
+        }
+        return <p key={index}>{renderCodexInlineMarkdown(block.text)}</p>;
+      })}
+    </div>
+  );
+}
+
+type CodexMarkdownBlock =
+  | { type: "paragraph"; text: string }
+  | { type: "heading"; level: number; text: string }
+  | { type: "list"; items: string[] }
+  | { type: "quote"; text: string }
+  | { type: "table"; rows: string[][] }
+  | { type: "code"; text: string; language?: string };
+
+function parseMarkdownBlocks(text: string): CodexMarkdownBlock[] {
+  const lines = text.replace(/\r\n/g, "\n").split("\n");
+  const blocks: CodexMarkdownBlock[] = [];
+  let paragraph: string[] = [];
+  let list: string[] = [];
+  let quote: string[] = [];
+  let table: string[][] = [];
+  let code: string[] | null = null;
+  let codeLanguage = "";
+  const flushParagraph = () => {
+    if (paragraph.length) blocks.push({ type: "paragraph", text: paragraph.join("\n") });
+    paragraph = [];
+  };
+  const flushList = () => {
+    if (list.length) blocks.push({ type: "list", items: list });
+    list = [];
+  };
+  const flushQuote = () => {
+    if (quote.length) blocks.push({ type: "quote", text: quote.join("\n") });
+    quote = [];
+  };
+  const flushTable = () => {
+    if (table.length) blocks.push({ type: "table", rows: table });
+    table = [];
+  };
+  const flushFlow = () => {
+    flushParagraph();
+    flushList();
+    flushQuote();
+    flushTable();
+  };
+
+  for (const line of lines) {
+    const fence = line.trim().match(/^```([A-Za-z0-9_.+-]*)/);
+    if (fence) {
+      if (code) {
+        blocks.push({ type: "code", text: code.join("\n"), language: codeLanguage || undefined });
+        code = null;
+        codeLanguage = "";
+      } else {
+        flushFlow();
+        code = [];
+        codeLanguage = fence[1] || "";
+      }
+      continue;
+    }
+    if (code) {
+      code.push(line);
+      continue;
+    }
+    const indentedCode = line.match(/^(?: {4}|\t)(.*)$/);
+    if (indentedCode) {
+      flushFlow();
+      blocks.push({ type: "code", text: indentedCode[1] });
+      continue;
+    }
+    const heading = line.match(/^(#{1,3})\s+(.+)$/);
+    if (heading) {
+      flushFlow();
+      blocks.push({ type: "heading", level: heading[1].length, text: heading[2] });
+      continue;
+    }
+    const bullet = line.match(/^\s*[-*]\s+(.+)$/);
+    if (bullet) {
+      flushParagraph();
+      flushQuote();
+      flushTable();
+      list.push(bullet[1]);
+      continue;
+    }
+    const quoteLine = line.match(/^>\s?(.*)$/);
+    if (quoteLine) {
+      flushParagraph();
+      flushList();
+      flushTable();
+      quote.push(quoteLine[1]);
+      continue;
+    }
+    if (isMarkdownTableLine(line)) {
+      flushParagraph();
+      flushList();
+      flushQuote();
+      const row = parseMarkdownTableRow(line);
+      if (!isMarkdownTableSeparator(row)) table.push(row);
+      continue;
+    }
+    if (!line.trim()) {
+      flushFlow();
+      continue;
+    }
+    flushList();
+    flushQuote();
+    flushTable();
+    paragraph.push(line);
+  }
+  if (code) blocks.push({ type: "code", text: code.join("\n"), language: codeLanguage || undefined });
+  flushFlow();
+  return blocks;
+}
+
+function isMarkdownTableLine(line: string) {
+  const trimmed = line.trim();
+  return trimmed.includes("|") && trimmed.split("|").filter((cell) => cell.trim()).length >= 2;
+}
+
+function parseMarkdownTableRow(line: string) {
+  return line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((cell) => cell.trim());
+}
+
+function isMarkdownTableSeparator(row: string[]) {
+  return row.every((cell) => /^:?-{3,}:?$/.test(cell));
+}
+
+function renderCodexInlineMarkdown(text: string) {
+  const parts = text.split(/(`[^`]+`|\*\*[^*]+\*\*)/g).filter(Boolean);
+  return parts.map((part, index) => {
+    if (part.startsWith("`") && part.endsWith("`")) return <code key={index}>{part.slice(1, -1)}</code>;
+    if (part.startsWith("**") && part.endsWith("**")) return <strong key={index}>{part.slice(2, -2)}</strong>;
+    return <React.Fragment key={index}>{part}</React.Fragment>;
+  });
 }
 
 function splitDraftList(value: string) {
@@ -2894,6 +5085,7 @@ function SettingsPanel({
   const [aiModel, setAiModel] = React.useState(settings.aiModel ?? settings.openAiModel);
   const [themeColor, setThemeColor] = React.useState(settings.workspaceThemeColor);
   const [quickAiRecordShortcut, setQuickAiRecordShortcut] = React.useState(settings.quickAiRecordShortcut);
+  const [codexExecutable, setCodexExecutable] = React.useState(settings.codexExecutable);
   const [apiTestBusy, setApiTestBusy] = React.useState(false);
   const [apiTestResult, setApiTestResult] = React.useState<{ ok: boolean; message: string } | null>(null);
   const [updateCheckBusy, setUpdateCheckBusy] = React.useState(false);
@@ -2915,6 +5107,10 @@ function SettingsPanel({
   React.useEffect(() => {
     setQuickAiRecordShortcut(settings.quickAiRecordShortcut);
   }, [settings.quickAiRecordShortcut]);
+
+  React.useEffect(() => {
+    setCodexExecutable(settings.codexExecutable);
+  }, [settings.codexExecutable]);
 
   function updateThemeColor(value: string) {
     setThemeColor(value);
@@ -2980,134 +5176,230 @@ function SettingsPanel({
 
   return (
     <section className="settings">
-      <section className="ai-setting" aria-label="模型服务设置">
-        <div className="setting-label">
-          <Sparkles size={14} /> 模型服务
+      <div className="settings-overview">
+        <div>
+          <strong>设置</strong>
+          <span>调整双击主窗口、AI 服务和桌宠行为。</span>
         </div>
-        <label>
-          提供商
-          <select
-            value={settings.aiProvider}
-            onChange={(event) => changeAiProvider(event.target.value as AppSettings["aiProvider"])}
-          >
-            <option value="deepseek">DeepSeek</option>
-            <option value="openai">OpenAI</option>
-            <option value="custom">自定义提供商</option>
-          </select>
-        </label>
-        {settings.aiProvider === "custom" && (
+        <div className="settings-status">
+          <span>{settings.aiProviderName ?? aiProviderPresets[settings.aiProvider].label}</span>
+          <span>{settings.aiModel ?? settings.openAiModel}</span>
+        </div>
+      </div>
+
+      <div className="settings-grid">
+        <section className="settings-section ai-setting" aria-label="模型服务设置">
+          <div className="settings-section-header">
+            <div className="setting-icon"><Sparkles size={15} /></div>
+            <div>
+              <strong>模型服务</strong>
+              <span>配置 OpenAI-compatible 服务，用于对话和待办识别。</span>
+            </div>
+          </div>
           <label>
-            提供商名称
-            <input
-              value={aiProviderName}
-              onChange={(event) => setAiProviderName(event.target.value)}
-              onBlur={() => persistAiConfig({ aiProviderName: aiProviderName || "自定义提供商" })}
-              placeholder="例如 OpenRouter / SiliconFlow"
-            />
+            提供商
+            <select
+              value={settings.aiProvider}
+              onChange={(event) => changeAiProvider(event.target.value as AppSettings["aiProvider"])}
+            >
+              <option value="deepseek">DeepSeek</option>
+              <option value="openai">OpenAI</option>
+              <option value="custom">自定义提供商</option>
+            </select>
           </label>
-        )}
-        <label>
-          Base URL
-          <input
-            value={aiBaseUrl}
-            onChange={(event) => setAiBaseUrl(event.target.value)}
-            onBlur={() => persistAiConfig({ aiBaseUrl: aiBaseUrl || undefined })}
-            placeholder="https://api.openai.com/v1"
-          />
-        </label>
-        <label>
-          模型
-          <input
-            value={aiModel}
-            onChange={(event) => setAiModel(event.target.value)}
-            onBlur={() => persistAiConfig({ aiModel: aiModel || aiProviderPresets[settings.aiProvider].model, openAiModel: aiModel || aiProviderPresets[settings.aiProvider].model })}
-            placeholder={aiProviderPresets[settings.aiProvider].model}
-          />
-        </label>
-        <label>
-          API Key
-          <input
-            value={apiKey}
-            onChange={(event) => setApiKey(event.target.value)}
-            onBlur={() => persistAiConfig({ aiApiKey: apiKey || undefined, openAiApiKey: apiKey || undefined })}
-            placeholder="也可使用对应环境变量"
-          />
-        </label>
-      </section>
-      <button className="test-api-button" onClick={() => void testApi()} disabled={apiTestBusy}>
-        <Sparkles size={15} /> {apiTestBusy ? "测试中..." : "测试 API"}
-      </button>
-      {apiTestResult && (
-        <div className={`api-test-result ${apiTestResult.ok ? "ok" : "error"}`}>
-          {apiTestResult.message}
-        </div>
-      )}
-      <section className="shortcut-setting" aria-label="快捷键设置">
-        <div className="setting-label">
-          <KeyRound size={14} /> 快捷键
-        </div>
-        <label>
-          快速 AI 记录
-          <input
-            value={quickAiRecordShortcut}
-            onChange={(event) => setQuickAiRecordShortcut(event.target.value)}
-            onBlur={() => onChange({ quickAiRecordShortcut: quickAiRecordShortcut.trim() || "CommandOrControl+Shift+Space" })}
-            placeholder="CommandOrControl+Shift+Space"
-          />
-        </label>
-        <div className="setting-hint">按下后会唤出桌宠气泡，可直接和 AI 对话记录任务。格式示例：CommandOrControl+Shift+Space。</div>
-      </section>
-      <section className="theme-setting" aria-label="双击页面主题颜色">
-        <div className="setting-label">双击页面主题颜色</div>
-        <div className="theme-swatches">
-          {workspaceThemePresets.map((color) => (
-            <button
-              key={color}
-              type="button"
-              className={`theme-swatch ${settings.workspaceThemeColor.toLowerCase() === color.toLowerCase() ? "active" : ""}`}
-              style={{ backgroundColor: color }}
-              onClick={() => updateThemeColor(color)}
-              aria-label={`使用主题色 ${color}`}
-            />
-          ))}
-          <label className="theme-picker" aria-label="自定义主题颜色">
-            <input type="color" value={themeColor} onChange={(event) => updateThemeColor(event.target.value)} />
-          </label>
-        </div>
-      </section>
-      <section className="appearance-setting" aria-label="更换桌宠形象">
-        <div className="setting-label">
-          <ImageIcon size={14} /> 桌宠形象
-        </div>
-        <div className="appearance-current">
-          <strong>{settings.petAppearance?.name ?? "默认 Linnea"}</strong>
-          <span>{settings.petAppearance?.directory ?? "使用内置状态图片"}</span>
-        </div>
-        <div className="appearance-actions">
-          <button className="appearance-button" onClick={onSelectPetAppearance}>
-            <FolderOpen size={15} /> 选择形象文件夹
-          </button>
-          {settings.petAppearance && (
-            <button className="appearance-button" onClick={onResetPetAppearance}>
-              <RotateCcw size={15} /> 恢复默认
-            </button>
+          {settings.aiProvider === "custom" && (
+            <label>
+              提供商名称
+              <input
+                value={aiProviderName}
+                onChange={(event) => setAiProviderName(event.target.value)}
+                onBlur={() => persistAiConfig({ aiProviderName: aiProviderName || "自定义提供商" })}
+                placeholder="例如 OpenRouter / SiliconFlow"
+              />
+            </label>
           )}
-        </div>
-        <div className="setting-hint">文件夹名需为 {"{角色名}_state"}，图片文件名如 _Idle_.png、_Talking_.png。</div>
-      </section>
-      <div className="settings-note">AI 识别到的任务会先生成草案，确认后才保存。</div>
-      <Toggle label="浮窗工具" checked={settings.selectionToolsEnabled} onChange={(value) => onChange({ selectionToolsEnabled: value })} />
-      <Toggle label="系统通知" checked={settings.systemNotifications} onChange={(value) => onChange({ systemNotifications: value })} />
-      <Toggle label="始终置顶" checked={settings.alwaysOnTop} onChange={(value) => onChange({ alwaysOnTop: value })} />
-      <button className="clear-chat-button" onClick={onClearMessages}>
-        <Trash2 size={15} /> 清除对话记录
-      </button>
-      <button className="test-reminder-button" onClick={() => void onTestReminder()}>
-        <Bell size={15} /> 测试 Windows 提醒
-      </button>
-      <button className="check-update-button" onClick={() => void checkForUpdates()} disabled={updateCheckBusy}>
-        <RotateCcw size={15} /> {updateCheckBusy ? "检查中..." : "检查更新"}
-      </button>
+          <div className="settings-two-column">
+            <label>
+              Base URL
+              <input
+                value={aiBaseUrl}
+                onChange={(event) => setAiBaseUrl(event.target.value)}
+                onBlur={() => persistAiConfig({ aiBaseUrl: aiBaseUrl || undefined })}
+                placeholder="https://api.openai.com/v1"
+              />
+            </label>
+            <label>
+              模型
+              <input
+                value={aiModel}
+                onChange={(event) => setAiModel(event.target.value)}
+                onBlur={() => persistAiConfig({ aiModel: aiModel || aiProviderPresets[settings.aiProvider].model, openAiModel: aiModel || aiProviderPresets[settings.aiProvider].model })}
+                placeholder={aiProviderPresets[settings.aiProvider].model}
+              />
+            </label>
+          </div>
+          <label>
+            API Key
+            <input
+              value={apiKey}
+              onChange={(event) => setApiKey(event.target.value)}
+              onBlur={() => persistAiConfig({ aiApiKey: apiKey || undefined, openAiApiKey: apiKey || undefined })}
+              placeholder="也可使用对应环境变量"
+            />
+          </label>
+          <div className="settings-inline-actions">
+            <button className="settings-action primary" onClick={() => void testApi()} disabled={apiTestBusy}>
+              <Sparkles size={15} /> {apiTestBusy ? "测试中..." : "测试 API"}
+            </button>
+            {apiTestResult && (
+              <div className={`api-test-result ${apiTestResult.ok ? "ok" : "error"}`}>
+                {apiTestResult.message}
+              </div>
+            )}
+          </div>
+        </section>
+
+        <section className="settings-section codex-setting" aria-label="Codex 设置">
+          <div className="settings-section-header">
+            <div className="setting-icon"><Sparkles size={15} /></div>
+            <div>
+              <strong>Codex</strong>
+              <span>设置双击主窗口中 Codex 面板的默认启动方式。</span>
+            </div>
+          </div>
+          <label>
+            启动命令
+            <input
+              value={codexExecutable}
+              onChange={(event) => setCodexExecutable(event.target.value)}
+              onBlur={() => onChange({ codexExecutable: codexExecutable.trim() || "codex" })}
+              placeholder="codex 或 codex --yolo"
+            />
+          </label>
+          <div className="settings-two-column">
+            <label>
+              默认 Sandbox
+              <select
+                value={settings.codexDefaultSandbox}
+                onChange={(event) => onChange({ codexDefaultSandbox: event.target.value as CodexSandboxPolicy })}
+              >
+                <option value="read-only">只读分析</option>
+                <option value="workspace-write">允许修改副本</option>
+                <option value="danger-full-access">完全权限</option>
+              </select>
+            </label>
+            <label>
+              默认 Approval
+              <select
+                value={settings.codexDefaultApproval}
+                onChange={(event) => onChange({ codexDefaultApproval: event.target.value as CodexApprovalPolicy })}
+              >
+                <option value="on-request">需要时询问</option>
+                <option value="never">不询问</option>
+              </select>
+            </label>
+          </div>
+          <div className="setting-hint">可填 codex、完整 codex.cmd 路径，或 codex --yolo。拖拽文件会先复制到隔离工作目录。</div>
+        </section>
+
+        <section className="settings-section shortcut-setting" aria-label="快捷键设置">
+          <div className="settings-section-header">
+            <div className="setting-icon"><KeyRound size={15} /></div>
+            <div>
+              <strong>快捷键</strong>
+              <span>快速唤出桌宠气泡，直接记录想法和任务。</span>
+            </div>
+          </div>
+          <label>
+            快速 AI 记录
+            <input
+              value={quickAiRecordShortcut}
+              onChange={(event) => setQuickAiRecordShortcut(event.target.value)}
+              onBlur={() => onChange({ quickAiRecordShortcut: quickAiRecordShortcut.trim() || "CommandOrControl+Shift+Space" })}
+              placeholder="CommandOrControl+Shift+Space"
+            />
+          </label>
+          <div className="setting-hint">格式示例：CommandOrControl+Shift+Space。</div>
+        </section>
+
+        <section className="settings-section theme-setting" aria-label="双击页面主题颜色">
+          <div className="settings-section-header">
+            <div className="setting-icon"><Settings size={15} /></div>
+            <div>
+              <strong>双击页面主题颜色</strong>
+              <span>同步工作台、提醒气泡和分区强调色。</span>
+            </div>
+          </div>
+          <div className="theme-swatches">
+            {workspaceThemePresets.map((color) => (
+              <button
+                key={color}
+                type="button"
+                className={`theme-swatch ${settings.workspaceThemeColor.toLowerCase() === color.toLowerCase() ? "active" : ""}`}
+                style={{ backgroundColor: color }}
+                onClick={() => updateThemeColor(color)}
+                aria-label={`使用主题色 ${color}`}
+              />
+            ))}
+            <label className="theme-picker" aria-label="自定义主题颜色">
+              <input type="color" value={themeColor} onChange={(event) => updateThemeColor(event.target.value)} />
+            </label>
+          </div>
+        </section>
+
+        <section className="settings-section appearance-setting" aria-label="更换桌宠形象">
+          <div className="settings-section-header">
+            <div className="setting-icon"><ImageIcon size={15} /></div>
+            <div>
+              <strong>桌宠形象</strong>
+              <span>替换完整状态图组，保持所有情绪状态可用。</span>
+            </div>
+          </div>
+          <div className="appearance-current">
+            <strong>{settings.petAppearance?.name ?? "默认 Linnea"}</strong>
+            <span>{settings.petAppearance?.directory ?? "使用内置状态图片"}</span>
+          </div>
+          <div className="appearance-actions">
+            <button className="settings-action" onClick={onSelectPetAppearance}>
+              <FolderOpen size={15} /> 选择形象文件夹
+            </button>
+            {settings.petAppearance && (
+              <button className="settings-action" onClick={onResetPetAppearance}>
+                <RotateCcw size={15} /> 恢复默认
+              </button>
+            )}
+          </div>
+          <div className="setting-hint">文件夹名需为 {"{角色名}_state"}，图片文件名如 _Idle_.png、_Talking_.png。</div>
+        </section>
+
+        <section className="settings-section behavior-setting" aria-label="行为设置">
+          <div className="settings-section-header">
+            <div className="setting-icon"><Bell size={15} /></div>
+            <div>
+              <strong>桌宠行为</strong>
+              <span>控制全局浮窗、系统提醒和窗口层级。</span>
+            </div>
+          </div>
+          <div className="toggle-list">
+            <Toggle label="浮窗工具" checked={settings.selectionToolsEnabled} onChange={(value) => onChange({ selectionToolsEnabled: value })} />
+            <Toggle label="系统通知" checked={settings.systemNotifications} onChange={(value) => onChange({ systemNotifications: value })} />
+            <Toggle label="始终置顶" checked={settings.alwaysOnTop} onChange={(value) => onChange({ alwaysOnTop: value })} />
+          </div>
+          <div className="settings-note">AI 识别到的任务会先生成草案，确认后才保存。</div>
+        </section>
+      </div>
+
+      <div className="settings-footer">
+        <button className="settings-action danger" onClick={onClearMessages}>
+          <Trash2 size={15} /> 清除对话记录
+        </button>
+        <button className="settings-action" onClick={() => void onTestReminder()}>
+          <Bell size={15} /> 测试 Windows 提醒
+        </button>
+        <button className="settings-action" onClick={() => void checkForUpdates()} disabled={updateCheckBusy}>
+          <RotateCcw size={15} /> {updateCheckBusy ? "检查中..." : "检查更新"}
+        </button>
+      </div>
     </section>
   );
 }

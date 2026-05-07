@@ -68,6 +68,9 @@ export interface AppSettings {
   selectionToolsEnabled: boolean;
   quickAiRecordShortcut: string;
   workspaceThemeColor: string;
+  codexExecutable: string;
+  codexDefaultSandbox: CodexSandboxPolicy;
+  codexDefaultApproval: CodexApprovalPolicy;
   skippedUpdateVersion?: string;
   petAppearance?: PetAppearance;
 }
@@ -145,6 +148,125 @@ export interface SelectionCapture {
   createdAt: string;
 }
 
+export type CodexSandboxPolicy = "read-only" | "workspace-write" | "danger-full-access";
+export type CodexApprovalPolicy = "on-request" | "never";
+
+export interface CodexDropItem {
+  path: string;
+  name: string;
+  kind: "file" | "directory" | "unknown";
+}
+
+export interface CodexCopiedItem extends CodexDropItem {
+  copiedName: string;
+  copiedPath: string;
+}
+
+export interface CodexCreateSessionOptions {
+  initialPrompt?: string;
+  sandbox: CodexSandboxPolicy;
+  approval: CodexApprovalPolicy;
+}
+
+export interface CodexSessionInfo {
+  id: string;
+  workspacePath: string;
+  saved: boolean;
+  savedPath?: string;
+  copiedItems: CodexCopiedItem[];
+  createdAt: string;
+  activeThreadId?: string;
+  history?: CodexSessionHistory;
+  threads?: Record<string, CodexSessionHistory>;
+}
+
+export interface CodexSavedSession {
+  id: string;
+  name: string;
+  rootPath: string;
+  workspacePath: string;
+  createdAt: string;
+  copiedItems: CodexCopiedItem[];
+  activeThreadId?: string;
+  history?: CodexSessionHistory;
+  threads?: Record<string, CodexSessionHistory>;
+}
+
+export interface CodexUiMessage {
+  id: string;
+  role: "user" | "assistant" | "system";
+  text: string;
+}
+
+export interface CodexUiActivity {
+  id: string;
+  type: string;
+  title: string;
+  text: string;
+  status?: string;
+}
+
+export interface CodexSessionHistory {
+  messages: CodexUiMessage[];
+  activity: CodexUiActivity[];
+  settings?: CodexThreadSettings;
+}
+
+export type CodexThreadMode = "default" | "plan";
+export type CodexReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
+
+export interface CodexThreadSettings {
+  model?: string;
+  reasoningEffort?: CodexReasoningEffort | null;
+  mode?: CodexThreadMode;
+}
+
+export interface CodexModelSummary {
+  id: string;
+  displayName?: string;
+  hidden?: boolean;
+  isDefault?: boolean;
+  defaultReasoningEffort?: string | null;
+  supportedReasoningEfforts?: Array<{ reasoningEffort: CodexReasoningEffort; description?: string }>;
+  inputModalities?: string[];
+  supportsPersonality?: boolean;
+}
+
+export interface CodexThreadSummary {
+  id: string;
+  preview: string;
+  name?: string | null;
+  path?: string | null;
+  cwd: string;
+  source: string;
+  status: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface CodexStartOptions {
+  initialPrompt?: string;
+  sandbox: CodexSandboxPolicy;
+  approval: CodexApprovalPolicy;
+}
+
+export interface CodexOutputEvent {
+  sessionId: string;
+  data: string;
+}
+
+export interface CodexExitEvent {
+  sessionId: string;
+  exitCode: number | null;
+  signal?: number;
+}
+
+export interface CodexUiEvent {
+  sessionId: string;
+  kind: "status" | "thread" | "item" | "delta" | "request" | "requestResolved" | "error" | "raw";
+  payload: unknown;
+}
+
 export interface DesktopPetApi {
   chat: {
     sendMessage(text: string): Promise<ChatResult>;
@@ -187,6 +309,30 @@ export interface DesktopPetApi {
     resizePopover(expanded: boolean): Promise<void>;
     createTodoFromCapture(id: string): Promise<void>;
   };
+  codex: {
+    createSession(items: CodexDropItem[], options: CodexCreateSessionOptions): Promise<CodexSessionInfo>;
+    createSessionFromFolder(options: CodexCreateSessionOptions): Promise<CodexSessionInfo | null>;
+    listSavedSessions(): Promise<CodexSavedSession[]>;
+    openSavedSession(savedSessionId: string, options: CodexCreateSessionOptions): Promise<CodexSessionInfo>;
+    renameSavedSession(savedSessionId: string, name: string): Promise<CodexSavedSession>;
+    deleteSavedSession(savedSessionId: string): Promise<void>;
+    listModels(sessionId: string): Promise<CodexModelSummary[]>;
+    listThreads(sessionId: string): Promise<CodexThreadSummary[]>;
+    resumeThread(sessionId: string, threadId: string): Promise<CodexSessionInfo>;
+    newThread(sessionId: string): Promise<CodexSessionInfo>;
+    getSession(sessionId: string): Promise<CodexSessionInfo>;
+    startSession(sessionId: string, options: CodexStartOptions): Promise<void>;
+    sendInput(sessionId: string, text: string): Promise<void>;
+    setThreadSettings(sessionId: string, settings: Partial<CodexThreadSettings>): Promise<CodexSessionInfo>;
+    respondRequest(sessionId: string, requestId: number | string, response: unknown): Promise<void>;
+    updateSessionHistory(sessionId: string, history: CodexSessionHistory): Promise<void>;
+    write(sessionId: string, data: string): Promise<void>;
+    resize(sessionId: string, cols: number, rows: number): Promise<void>;
+    stopSession(sessionId: string): Promise<void>;
+    saveSession(sessionId: string): Promise<CodexSessionInfo>;
+    discardSession(sessionId: string): Promise<void>;
+    openWorkspace(sessionId: string): Promise<void>;
+  };
   app: {
     snapshot(): Promise<AppSnapshot>;
     setIgnoreMouseEvents(ignore: boolean): Promise<void>;
@@ -197,6 +343,7 @@ export interface DesktopPetApi {
     setPetWindowExpanded(expanded: boolean): Promise<void>;
     openWorkspaceWindow(todoId?: string): Promise<void>;
     checkForUpdates(): Promise<void>;
+    getPathForFile(file: File): string;
   };
   events: {
     onReminderFired(callback: (reminder: ReminderItem) => void): () => void;
@@ -204,6 +351,9 @@ export interface DesktopPetApi {
     onTodoFocus(callback: (todoId: string) => void): () => void;
     onSelectedTextTodo(callback: (text: string) => void): () => void;
     onQuickAiRecord(callback: () => void): () => void;
+    onCodexOutput(callback: (event: CodexOutputEvent) => void): () => void;
+    onCodexExit(callback: (event: CodexExitEvent) => void): () => void;
+    onCodexEvent(callback: (event: CodexUiEvent) => void): () => void;
   };
 }
 

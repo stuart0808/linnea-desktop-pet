@@ -27,6 +27,9 @@ const defaultSettings: AppSettings = {
   selectionToolsEnabled: true,
   quickAiRecordShortcut: "CommandOrControl+Shift+Space",
   workspaceThemeColor: "#5aa982",
+  codexExecutable: "codex",
+  codexDefaultSandbox: "workspace-write",
+  codexDefaultApproval: "on-request",
   skippedUpdateVersion: undefined
 };
 
@@ -205,9 +208,21 @@ function normalizeSettings(settings: AppSettings): AppSettings {
     selectionToolsEnabled: settings.selectionToolsEnabled !== false,
     quickAiRecordShortcut: normalizeNonEmptyString(settings.quickAiRecordShortcut) ?? "CommandOrControl+Shift+Space",
     workspaceThemeColor: normalizeThemeColor(settings.workspaceThemeColor),
+    codexExecutable: normalizeNonEmptyString(settings.codexExecutable) ?? "codex",
+    codexDefaultSandbox: normalizeCodexSandbox(settings.codexDefaultSandbox),
+    codexDefaultApproval: normalizeCodexApproval(settings.codexDefaultApproval),
     skippedUpdateVersion: normalizeOptionalString(settings.skippedUpdateVersion),
     petAppearance: settings.petAppearance?.directory ? settings.petAppearance : undefined
   };
+}
+
+function normalizeCodexSandbox(value: AppSettings["codexDefaultSandbox"] | undefined): AppSettings["codexDefaultSandbox"] {
+  if (value === "read-only" || value === "danger-full-access") return value;
+  return "workspace-write";
+}
+
+function normalizeCodexApproval(value: AppSettings["codexDefaultApproval"] | undefined): AppSettings["codexDefaultApproval"] {
+  return value === "never" ? "never" : "on-request";
 }
 
 function getProviderPreset(provider: AppSettings["aiProvider"]) {
