@@ -1,35 +1,81 @@
 # Linnea Desktop Pet
 
-Windows 桌面宠物应用，包含 Q 版 Linnea 桌宠窗口、AI 对话、待办草案确认、日历排程、总结视图、本地提醒、Windows 系统通知和设置面板。
+Linnea 是一个 Windows 桌面宠物应用。它把透明桌宠、AI 对话、待办草案确认、日历排程、每日总结、Codex 工作流和系统提醒整合在一个轻量桌面助手里，适合用来陪伴式整理当天任务。
 
-## Description
+## Features
 
-Linnea 是一个面向 Windows 的桌面宠物应用。它将透明桌宠、对话助手、待办记录、日历时间线、每日总结和系统提醒整合在一起，适合用来陪伴式整理当天任务。
-
-当前版本支持：
-
-- 透明桌宠窗口、拖动定位、单击气泡对话、双击打开主窗口。
-- AI 任务记录两阶段流程：先生成待办草案，用户确认后才写入本地数据库。
-- 独立待办页，支持范围过滤、项目/标签/优先级、右侧详情编辑、子任务、重复规则、备注和附件字段。
-- 日历页支持日/周/月视图、任务池拖拽排程、截止时间与计划时间分离、风险任务标红提示。
-- 总结页支持今天/本周/本月视图，展示计划、复盘指标和风险收件箱。
-- 支持 DeepSeek、OpenAI 或自定义 OpenAI-compatible 提供商、Base URL、模型和 API Key。
-- 支持快捷键快速唤出 AI 记录气泡，默认 `CommandOrControl+Shift+Space`。
-- 支持 GitHub 新版本检查、跳过当前版本、手动检查更新。
-- Windows 系统通知和桌宠提醒气泡，提醒气泡跟随全局主题颜色。
-- 主题颜色、自定义桌宠形象文件夹、清除对话等设置。
+- 透明桌宠窗口：支持拖动定位、单击气泡对话、双击打开主工作台。
+- 快速入门：在主工作台内用交互式流程体验对话草案、待办确认、日历排程、总结复盘、Codex 文件篮和设置偏好。
+- AI 任务记录：用户先用自然语言描述任务，AI 生成待办草案，确认后才写入本地数据。
+- 待办管理：支持范围过滤、项目、标签、优先级、截止时间、提醒、计划时间、子任务、重复规则、备注和附件。
+- 日历排程：支持日/周/月视图，可把任务池里的任务安排到时间块，并区分截止时间和计划执行时间。
+- 总结视图：支持今天/本周/本月视图，展示计划、复盘指标、风险任务和 AI 总结。
+- Codex 工作流：支持拖拽文件/文件夹创建隔离副本、保存会话、恢复线程、新建线程、模型切换和指令补全。
+- 全局选区工具：可对选中文字做总结、翻译或转成待办。
+- Windows 提醒：支持桌宠提醒气泡和系统通知。
+- 可配置外观：支持主题色和自定义桌宠状态图片文件夹。
+- 可配置 AI 服务：支持 DeepSeek、OpenAI 或自定义 OpenAI-compatible 提供商。
 
 ## Release
 
 最新版本：`v1.0.0`
 
-Windows 安装包由 `electron-builder` 生成，文件名为 `Linnea Setup 1.0.0.exe`。
+Windows 安装包由 `electron-builder` 生成，文件名为：
 
-## Run
+```text
+Linnea Setup 1.0.0.exe
+```
+
+GitHub Release 草稿创建后，可手动上传安装包和可选 blockmap：
+
+```text
+release/Linnea Setup 1.0.0.exe
+release/Linnea Setup 1.0.0.exe.blockmap
+```
+
+## Usage
+
+启动后，桌面上会出现 Linnea 桌宠：
+
+- 单击桌宠：打开快速对话气泡。
+- 双击桌宠：打开主工作台。
+- 使用快捷键：默认 `CommandOrControl+Shift+Space`，快速唤出 AI 记录气泡。
+- 拖拽文件到桌宠：加入 Codex 文件篮，确认后创建隔离副本。
+
+主工作台包含：
+
+- 快速入门：新用户交互式体验完整流程。
+- 对话：和 Linnea 对话，生成待办草案。
+- 待办：集中整理任务属性。
+- 日历：安排执行时间。
+- 总结：复盘计划和风险。
+- Codex：面向代码任务的隔离工作流。
+- 设置：配置 AI、Codex、快捷键、通知、主题和形象。
+
+## Development
+
+安装依赖：
 
 ```powershell
 npm install
+```
+
+开发运行：
+
+```powershell
 npm run dev
+```
+
+不透明窗口开发模式：
+
+```powershell
+npm run dev:solid
+```
+
+类型检查：
+
+```powershell
+npm run typecheck
 ```
 
 生产构建：
@@ -37,6 +83,12 @@ npm run dev
 ```powershell
 npm run build
 npx electron .
+```
+
+Windows 安装包：
+
+```powershell
+npm run dist:win
 ```
 
 ## AI Provider
@@ -49,11 +101,64 @@ $env:DEEPSEEK_API_KEY="sk-..."
 
 也可以在应用设置面板里填写 API Key、Base URL 和模型名称。自定义提供商需要兼容 OpenAI Chat Completions API。
 
-默认模型为 `deepseek-v4-flash`。如需更强模型，可在应用设置中修改。
+默认模型为：
 
-## Character Asset Direction
+```text
+deepseek-v4-flash
+```
 
-当前版本内置 PNG 状态素材，默认位置在 `src/assets/pet/linnea_state`。也可以在设置中选择自定义桌宠形象文件夹。
+## Codex
+
+Codex 功能面向代码任务：
+
+- 可从主工作台选择文件夹开始。
+- 可把文件或文件夹拖到桌宠文件篮。
+- 每次会话会先复制到隔离工作目录，避免直接修改原文件。
+- 支持保存会话、恢复历史线程、新建线程、停止会话。
+- 支持 `/model`、`/review`、`/compact`、`@文件名` 等输入补全。
+
+Codex 启动命令可在设置中配置。默认值为：
+
+```text
+codex
+```
+
+可填写 `codex`、完整 `codex.cmd` 路径，或带参数的命令。
+
+## Icons
+
+应用图标资源位于：
+
+```text
+src/assets/app/linnea-icon.png
+src/assets/app/linnea-icon.ico
+```
+
+Windows 打包时会使用 `scripts/afterPack.cjs` 通过本地 `rcedit.exe` 把图标写入 `Linnea.exe`，避免安装后桌面快捷方式和任务栏显示 Electron 默认图标。
+
+## Character Assets
+
+当前版本内置 PNG 状态素材，默认位置：
+
+```text
+src/assets/pet/linnea_state
+```
+
+也可以在设置中选择自定义桌宠形象文件夹。文件夹名建议为：
+
+```text
+{角色名}_state
+```
+
+图片文件名示例：
+
+```text
+_Idle_.png
+_Talking_.png
+_Happy_.png
+_Thinking_.png
+_Reminder_.png
+```
 
 建议 AI 资产提示词：
 
