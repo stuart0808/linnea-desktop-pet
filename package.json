@@ -22,6 +22,7 @@
     "directories": {
       "output": "release"
     },
+    "afterPack": "scripts/afterPack.cjs",
     "files": [
       "dist/**/*",
       "dist-electron/**/*",
@@ -42,6 +43,8 @@
       ]
     },
     "nsis": {
+      "installerIcon": "src/assets/app/linnea-icon.ico",
+      "uninstallerIcon": "src/assets/app/linnea-icon.ico",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
