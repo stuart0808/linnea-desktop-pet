@@ -354,6 +354,7 @@ export interface DesktopPetApi {
     openWorkspaceWindow(todoId?: string): Promise<void>;
     checkForUpdates(): Promise<void>;
     getPathForFile(file: File): string;
+    openPath(filePath: string): Promise<{ ok: boolean; message?: string }>;
   };
   events: {
     onReminderFired(callback: (reminder: ReminderItem) => void): () => void;

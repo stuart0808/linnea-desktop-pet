@@ -1,8 +1,9 @@
 import React from "react";
 import { parseMarkdownBlocks, renderCodexInlineMarkdown } from "../../utils/codexHelpers";
 
-export function MarkdownText({ text }: { text: string }) {
+export function MarkdownText({ text, onOpenPath }: { text: string; onOpenPath?: (path: string) => void }) {
   const blocks = React.useMemo(() => parseMarkdownBlocks(text), [text]);
+  const inline = (src: string) => renderCodexInlineMarkdown(src, onOpenPath);
   return (
     <div className="codex-markdown">
       {blocks.map((block, index) => {
@@ -16,9 +17,9 @@ export function MarkdownText({ text }: { text: string }) {
         }
         if (block.type === "heading") {
           const Heading = `h${Math.min(3, block.level)}` as "h1" | "h2" | "h3";
-          return <Heading key={index}>{renderCodexInlineMarkdown(block.text)}</Heading>;
+          return <Heading key={index}>{inline(block.text)}</Heading>;
         }
-        if (block.type === "quote") return <blockquote key={index}>{renderCodexInlineMarkdown(block.text)}</blockquote>;
+        if (block.type === "quote") return <blockquote key={index}>{inline(block.text)}</blockquote>;
         if (block.type === "table") {
           return (
             <div key={index} className="codex-table-wrap">
@@ -27,8 +28,8 @@ export function MarkdownText({ text }: { text: string }) {
                   {block.rows.map((row, rowIndex) => (
                     <tr key={rowIndex}>
                       {row.map((cell, cellIndex) => rowIndex === 0
-                        ? <th key={cellIndex}>{renderCodexInlineMarkdown(cell)}</th>
-                        : <td key={cellIndex}>{renderCodexInlineMarkdown(cell)}</td>)}
+                        ? <th key={cellIndex}>{inline(cell)}</th>
+                        : <td key={cellIndex}>{inline(cell)}</td>)}
                     </tr>
                   ))}
                 </tbody>
@@ -39,11 +40,11 @@ export function MarkdownText({ text }: { text: string }) {
         if (block.type === "list") {
           return (
             <ul key={index}>
-              {block.items.map((item, itemIndex) => <li key={itemIndex}>{renderCodexInlineMarkdown(item)}</li>)}
+              {block.items.map((item, itemIndex) => <li key={itemIndex}>{inline(item)}</li>)}
             </ul>
           );
         }
-        return <p key={index}>{renderCodexInlineMarkdown(block.text)}</p>;
+        return <p key={index}>{inline(block.text)}</p>;
       })}
     </div>
   );

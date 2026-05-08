@@ -1,10 +1,10 @@
 import React from "react";
 import { FolderOpen, ListTodo, Send, Sparkles, Square } from "lucide-react";
 import type { CodexApprovalPolicy, CodexModelSummary, CodexSandboxPolicy, CodexSessionInfo, CodexThreadSummary, CodexUiActivity, CodexUiMessage, DesktopPetApi } from "../../../shared/types";
-import { applyCodexThreadEventToSession, applyCodexUiEvent, getCodexActiveThreadSettings, getCodexEventThreadId, getCodexInputSuggestions, getNextCodexInputHistory, handleLocalCodexCommand, rememberCodexInput } from "../../utils/codexHelpers";
+import { applyCodexThreadEventToSession, applyCodexUiEvent, getCodexActiveThreadSettings, getCodexEventThreadId, getCodexInputSuggestions, getNextCodexInputHistory, handleLocalCodexCommand, rememberCodexInput, resolveCodexDisplayPath } from "../../utils/codexHelpers";
 import { MarkdownText } from "./MarkdownText";
 import { CodexRequestCard } from "./CodexRequestCard";
-import { CodexResumePicker, CodexSuggestionPicker, CodexThinkingMessage, CodexThreadBadges } from "./CodexUIComponents";
+import { ActivityItemContent, CodexResumePicker, CodexSuggestionPicker, CodexThinkingMessage, CodexThreadBadges } from "./CodexUIComponents";
 
 export function CodexEmbeddedConversation({
   api,
@@ -283,6 +283,19 @@ export function CodexEmbeddedConversation({
     setStatusText("Codex 已停止");
   }
 
+  const handleOpenPath = React.useCallback((path: string) => {
+    if (!api?.app.openPath) {
+      setStatusText("当前窗口没有可用的打开路径 API，请重启应用。");
+      return;
+    }
+    const targetPath = resolveCodexDisplayPath(path, session.workspacePath);
+    void api.app.openPath(targetPath).then((result) => {
+      if (!result.ok) setStatusText(result.message ?? "打开路径失败。");
+    }).catch((error) => {
+      setStatusText(error instanceof Error ? error.message : "打开路径失败。");
+    });
+  }, [api, session.workspacePath]);
+
   React.useEffect(() => {
     onSessionChange({ ...session, history: { messages, activity } });
   }, [activity, messages, onSessionChange, session]);
@@ -308,7 +321,7 @@ export function CodexEmbeddedConversation({
         {messages.map((message) => (
           <div key={message.id} className={`codex-chat-message ${message.role}`}>
             <strong>{message.role === "user" ? "你" : message.role === "assistant" ? "Codex" : "系统"}</strong>
-            <MarkdownText text={message.text} />
+            <MarkdownText text={message.text} onOpenPath={handleOpenPath} />
           </div>
         ))}
         {requests.map((request) => (
@@ -320,9 +333,11 @@ export function CodexEmbeddedConversation({
           <div>
             {activity.length === 0 ? <span>暂无命令或文件活动。</span> : activity.map((item) => (
               <div key={item.id} className={`codex-activity ${item.type}`}>
-                <strong>{item.title}</strong>
-                {item.status && <span>{item.status}</span>}
-                {item.text && <pre>{item.text}</pre>}
+                <div className="codex-activity-header">
+                  <strong>{item.title}</strong>
+                  {item.status && <span className={`codex-activity-status ${item.status}`}>{item.status}</span>}
+                </div>
+                <ActivityItemContent item={item} workspacePath={session.workspacePath} onOpenPath={handleOpenPath} />
               </div>
             ))}
           </div>

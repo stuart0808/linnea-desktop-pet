@@ -91,9 +91,15 @@ export function CalendarPanel({
     start.setHours(allDay ? 0 : hour, 0, 0, 0);
     const end = new Date(start);
     end.setMinutes(end.getMinutes() + (allDay ? 24 * 60 - 1 : 60));
+    scheduleTodoRange(todo, start, end, allDay);
+  }
+
+  function scheduleTodoRange(todo: TodoItem, start: Date, end: Date, allDay = false) {
+    if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime())) return;
+    const safeEnd = end.getTime() > start.getTime() ? end : new Date(start.getTime() + 15 * 60_000);
     onUpdate(todo, {
       scheduledStartAt: start.toISOString(),
-      scheduledEndAt: end.toISOString(),
+      scheduledEndAt: safeEnd.toISOString(),
       isAllDayScheduled: allDay
     });
     setSelectedTodoId(todo.id);
@@ -101,8 +107,8 @@ export function CalendarPanel({
 
   function unscheduleTodo(todo: TodoItem) {
     onUpdate(todo, {
-      scheduledStartAt: undefined,
-      scheduledEndAt: undefined,
+      scheduledStartAt: null as unknown as undefined,
+      scheduledEndAt: null as unknown as undefined,
       isAllDayScheduled: false
     });
   }
@@ -205,6 +211,7 @@ export function CalendarPanel({
             selectedTodoId={selectedTodoId}
             onSelectTodo={setSelectedTodoId}
             onSchedule={scheduleTodo}
+            onScheduleRange={scheduleTodoRange}
             onUnschedule={unscheduleTodo}
           />
         )}

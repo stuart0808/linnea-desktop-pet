@@ -1,8 +1,89 @@
 import React from "react";
 import { Check, X } from "lucide-react";
-import type { CodexModelSummary, CodexThreadSettings, CodexThreadSummary } from "../../../shared/types";
+import type { CodexModelSummary, CodexThreadSettings, CodexThreadSummary, CodexUiActivity } from "../../../shared/types";
 import type { CodexInputSuggestion } from "../../utils/codexHelpers";
-import { getCodexModelLabel } from "../../utils/codexHelpers";
+import { getCodexModelLabel, pathBasename, resolveCodexDisplayPath, stripAnsi } from "../../utils/codexHelpers";
+
+const CHANGE_TYPE_LABELS: Record<string, string> = { add: "新增", delete: "删除", create: "新增", remove: "删除", update: "修改" };
+
+function DiffView({ patch }: { patch: string }) {
+  return (
+    <pre className="codex-diff">
+      {patch.split("\n").map((line, i) => {
+        const cls = line.startsWith("+") && !line.startsWith("+++") ? "diff-add"
+          : line.startsWith("-") && !line.startsWith("---") ? "diff-rm"
+          : line.startsWith("@@") ? "diff-hunk"
+          : line.startsWith("---") || line.startsWith("+++") ? "diff-file-header"
+          : "";
+        return <span key={i} className={cls}>{line + "\n"}</span>;
+      })}
+    </pre>
+  );
+}
+
+export function FileChangesView({ text, workspacePath, onOpenPath }: {
+  text: string;
+  workspacePath: string;
+  onOpenPath: (path: string) => void;
+}) {
+  const changes = React.useMemo(() => {
+    try {
+      const parsed: unknown = JSON.parse(text);
+      return Array.isArray(parsed) ? (parsed as Record<string, unknown>[]) : null;
+    } catch { return null; }
+  }, [text]);
+
+  if (!changes) return <pre className="codex-activity-pre">{text}</pre>;
+  if (changes.length === 0) return <span className="codex-activity-empty">无文件变更</span>;
+
+  return (
+    <div className="codex-file-changes">
+      {changes.map((change, i) => {
+        const relPath = typeof change.path === "string" ? change.path : null;
+        const patch = typeof change.patch === "string" ? change.patch : null;
+        const changeType = typeof change.type === "string" ? change.type : "update";
+        const absPath = relPath ? resolveCodexDisplayPath(relPath, workspacePath) : null;
+        const label = CHANGE_TYPE_LABELS[changeType] ?? "修改";
+        return (
+          <div key={i} className="codex-file-change">
+            {relPath ? (
+              <div className="codex-file-change-path">
+                <span className={`codex-change-badge ${changeType === "add" || changeType === "create" ? "add" : changeType === "delete" || changeType === "remove" ? "delete" : "update"}`}>
+                  {label}
+                </span>
+                <button type="button" className="codex-path-chip" title={absPath ?? relPath} onClick={() => absPath && onOpenPath(absPath)}>
+                  {pathBasename(relPath)}
+                </button>
+              </div>
+            ) : null}
+            {patch ? <DiffView patch={patch} /> : null}
+            {!relPath && !patch ? <pre className="codex-activity-pre">{JSON.stringify(change, null, 2)}</pre> : null}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+export function CommandOutputView({ text }: { text: string }) {
+  const clean = React.useMemo(() => stripAnsi(text), [text]);
+  return <pre className="codex-command-output">{clean}</pre>;
+}
+
+export function ActivityItemContent({ item, workspacePath, onOpenPath }: {
+  item: CodexUiActivity;
+  workspacePath: string;
+  onOpenPath: (path: string) => void;
+}) {
+  if (!item.text) return null;
+  if (item.type === "file") {
+    return <FileChangesView text={item.text} workspacePath={workspacePath} onOpenPath={onOpenPath} />;
+  }
+  if (item.type === "command") {
+    return <CommandOutputView text={item.text} />;
+  }
+  return <pre className="codex-activity-pre">{item.text}</pre>;
+}
 
 export function CodexThinkingMessage() {
   return (

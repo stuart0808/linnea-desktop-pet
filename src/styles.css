@@ -3094,7 +3094,7 @@ input {
   min-width: 882px;
   display: grid;
   grid-template-columns: 56px repeat(var(--calendar-day-count, 7), minmax(118px, 1fr));
-  grid-auto-rows: minmax(58px, auto);
+  grid-auto-rows: auto;
 }
 
 .calendar-canvas.day .calendar-time-canvas {
@@ -3168,6 +3168,20 @@ input {
   background: rgba(255, 255, 255, .68);
 }
 
+.calendar-day-column {
+  position: relative;
+  display: grid;
+  grid-template-rows: repeat(14, 58px);
+  min-width: 0;
+  background: rgba(255, 255, 255, .32);
+}
+
+.calendar-day-column .calendar-hour-cell {
+  min-height: 58px;
+  border-left: 1px solid var(--workspace-border);
+  padding: 0;
+}
+
 .calendar-hour-cell:hover,
 .calendar-all-day-cell:hover {
   background: var(--workspace-soft);
@@ -3177,16 +3191,38 @@ input {
   position: relative;
   min-width: 0;
   display: grid;
+  align-content: start;
   gap: 2px;
   border: 1px solid var(--workspace-border);
   border-left: 4px solid var(--workspace-accent);
   border-radius: 7px;
-  padding: 6px 18px 6px 7px;
+  padding: 6px 18px 8px 7px;
   background: #fff;
   color: #223031;
   cursor: pointer;
   text-align: left;
   box-shadow: 0 4px 10px rgba(21, 40, 38, .08);
+  overflow: hidden;
+  user-select: none;
+}
+
+.calendar-block[draggable="true"] {
+  cursor: grab;
+}
+
+.calendar-block[draggable="true"]:active {
+  cursor: grabbing;
+}
+
+.calendar-day-column > .calendar-block {
+  z-index: 2;
+  margin: 0;
+  min-height: 28px;
+  transition: box-shadow .15s ease, transform .15s ease;
+}
+
+.calendar-day-column > .calendar-block:hover {
+  transform: translateY(-1px);
 }
 
 .calendar-block.priority-urgent {
@@ -3224,6 +3260,9 @@ input {
 .calendar-block span {
   color: #61716e;
   font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .calendar-block.risk span {
@@ -3252,6 +3291,27 @@ input {
   color: #7a4542;
   font-style: normal;
   cursor: pointer;
+}
+
+.calendar-resize-handle {
+  position: absolute;
+  left: 9px;
+  right: 9px;
+  bottom: 2px;
+  height: 8px;
+  cursor: ns-resize;
+}
+
+.calendar-resize-handle::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: 2px;
+  width: 28px;
+  height: 3px;
+  border-radius: 999px;
+  background: rgba(76, 120, 112, .28);
+  transform: translateX(-50%);
 }
 
 .calendar-month-canvas {
@@ -4132,7 +4192,6 @@ input {
   font-weight: 700;
 }
 
-.codex-activity pre,
 .codex-request-card pre,
 .codex-raw-log pre {
   max-height: 260px;
@@ -4148,7 +4207,6 @@ input {
   white-space: pre-wrap;
 }
 
-.codex-activity span,
 .codex-request-card span {
   color: #61716e;
   font-size: 12px;
@@ -4387,6 +4445,176 @@ input {
 .codex-activity {
   max-width: 100%;
   box-shadow: none;
+}
+
+/* Activity type-specific left-border accent colors */
+.codex-activity.command { border-left: 3px solid #3b82f6; }
+.codex-activity.file    { border-left: 3px solid #22c55e; }
+.codex-activity.plan    { border-left: 3px solid #a78bfa; }
+.codex-activity.reasoning { border-left: 3px solid #f59e0b; }
+
+.codex-activity.command strong { color: #1d4ed8; }
+.codex-activity.file strong    { color: #15803d; }
+.codex-activity.plan strong    { color: #7c3aed; }
+.codex-activity.reasoning strong { color: #b45309; }
+
+/* Activity header row */
+.codex-activity-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.codex-activity-header strong {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Status badge */
+.codex-activity-status {
+  flex-shrink: 0;
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #fff;
+  background: #61716e;
+}
+
+.codex-activity-status.完成   { background: #16a34a; }
+.codex-activity-status.运行中 { background: #2563eb; }
+.codex-activity-status.思考中 { background: #d97706; }
+.codex-activity-status.更新中 { background: #7c3aed; }
+.codex-activity-status.待确认 { background: #ea580c; }
+
+/* File path chip — shows filename only, full path in title tooltip */
+.codex-path-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: rgba(37, 99, 235, .07);
+  border: 1px solid rgba(37, 99, 235, .22);
+  border-radius: 4px;
+  padding: 0 7px;
+  height: 20px;
+  cursor: pointer;
+  color: #1d4ed8;
+  font-family: Consolas, "SFMono-Regular", monospace;
+  font-size: 11.5px;
+  line-height: 1;
+  white-space: nowrap;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+  transition: background 0.1s, border-color 0.1s;
+}
+
+.codex-path-chip:hover {
+  background: rgba(37, 99, 235, .14);
+  border-color: rgba(37, 99, 235, .4);
+  color: #1e40af;
+}
+
+/* Command output pre */
+.codex-command-output {
+  max-height: 260px;
+  margin: 6px 0 0;
+  overflow: auto;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #10201d;
+  color: #eef7f2;
+  font-family: Consolas, "SFMono-Regular", monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Generic activity pre (plan, reasoning, fallback) */
+.codex-activity-pre {
+  max-height: 260px;
+  margin: 6px 0 0;
+  overflow: auto;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgba(16, 32, 29, .05);
+  color: #25413e;
+  font-family: Consolas, "SFMono-Regular", monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* File change list */
+.codex-file-changes {
+  display: grid;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.codex-file-change {
+  border: 1px solid var(--workspace-border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.codex-file-change-path {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 9px;
+  background: rgba(16, 32, 29, .04);
+  border-bottom: 1px solid var(--workspace-border);
+  font-size: 12px;
+  flex-wrap: wrap;
+}
+
+.codex-change-badge {
+  flex-shrink: 0;
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #fff;
+  background: #61716e;
+}
+
+.codex-change-badge.add    { background: #16a34a; }
+.codex-change-badge.delete { background: #dc2626; }
+.codex-change-badge.update { background: #2563eb; }
+
+.codex-file-change .codex-path-chip {
+  font-size: 12px;
+  font-family: Consolas, "SFMono-Regular", monospace;
+}
+
+/* Diff view */
+.codex-diff {
+  margin: 0;
+  max-height: 280px;
+  overflow: auto;
+  padding: 6px 10px;
+  background: #10201d;
+  color: #eef7f2;
+  font-family: Consolas, "SFMono-Regular", monospace;
+  font-size: 11.5px;
+  line-height: 1.5;
+  white-space: pre;
+}
+
+.codex-diff .diff-add  { color: #86efac; display: block; }
+.codex-diff .diff-rm   { color: #fca5a5; display: block; }
+.codex-diff .diff-hunk { color: #67e8f9; display: block; }
+.codex-diff .diff-file-header { color: #d8b4fe; display: block; }
+
+.codex-activity-empty {
+  color: #61716e;
+  font-size: 12px;
 }
 
 .codex-raw-log summary {

@@ -2,7 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, shell, WebContents } from "electro
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
-import { basename, extname, join } from "node:path";
+import { basename, extname, isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { askPetAssistant, summarizeRecentContext, testAiConnection } from "./openaiClient.js";
 import { JsonStore } from "./storage.js";
@@ -230,6 +230,29 @@ export function registerIpc(): void {
   });
   ipcMain.handle("app:openWorkspaceWindow", (_event, todoId?: unknown) => openWorkspaceWindow(todoId === undefined ? undefined : validateStringId(todoId, "todoId")));
   ipcMain.handle("app:checkForUpdates", () => checkForUpdates(true));
+  ipcMain.handle("app:openPath", async (_event, filePath: unknown): Promise<{ ok: boolean; message?: string }> => {
+    if (typeof filePath !== "string" || !filePath.trim()) {
+      return { ok: false, message: "路径不能为空。" };
+    }
+    const targetPath = filePath.trim();
+    if (!isAbsolute(targetPath)) {
+      return { ok: false, message: `只能打开绝对路径：${targetPath}` };
+    }
+    const targetStat = await stat(targetPath).catch(() => null);
+    if (!targetStat) {
+      return { ok: false, message: `路径不存在：${targetPath}` };
+    }
+    try {
+      if (targetStat.isDirectory()) {
+        const errorMessage = await shell.openPath(targetPath);
+        return errorMessage ? { ok: false, message: errorMessage } : { ok: true };
+      }
+      shell.showItemInFolder(targetPath);
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, message: error instanceof Error ? error.message : "打开路径失败。" };
+    }
+  });
 
   ipcMain.handle("chat:listMessages", () => store.listMessages());
   ipcMain.handle("chat:clearMessages", async (_event) => {

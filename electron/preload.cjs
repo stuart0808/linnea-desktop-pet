@@ -84,7 +84,8 @@ const api = {
     setPetWindowExpanded: (expanded) => ipcRenderer.invoke("app:setPetWindowExpanded", expanded),
     openWorkspaceWindow: (todoId) => ipcRenderer.invoke("app:openWorkspaceWindow", todoId),
     checkForUpdates: () => ipcRenderer.invoke("app:checkForUpdates"),
-    getPathForFile: (file) => webUtils.getPathForFile(file)
+    getPathForFile: (file) => webUtils.getPathForFile(file),
+    openPath: (filePath) => ipcRenderer.invoke("app:openPath", filePath)
   },
   events: {
     onReminderFired: (callback) => {

@@ -447,9 +447,97 @@ function isMarkdownTableSeparator(row: string[]) {
   return row.every((cell) => /^[-:]+$/.test(cell));
 }
 
-export function renderCodexInlineMarkdown(text: string) {
-  return text
-    .replace(/`([^`]+)`/g, "<code>$1</code>")
-    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
-    .replace(/\*([^*]+)\*/g, "<em>$1</em>");
+export function looksLikeFilePath(text: string): boolean {
+  if (/^[A-Za-z]:[/\\]/.test(text)) return true;
+  if (/^\/[a-zA-Z0-9]/.test(text) && text.includes("/")) return true;
+  if (/^\.\.?[/\\]/.test(text)) return true;
+  // relative path: contains "/" and ends with a file extension
+  if (/\/[a-zA-Z0-9_.-]+\.[a-zA-Z]{1,10}$/.test(text) && !/\s/.test(text)) return true;
+  return false;
+}
+
+export function stripAnsi(text: string): string {
+  // eslint-disable-next-line no-control-regex
+  return text.replace(/\x1b\[[0-9;]*[A-Za-z]/g, "").replace(/\r/g, "");
+}
+
+export function pathBasename(p: string): string {
+  return p.split(/[/\\]/).filter(Boolean).pop() ?? p;
+}
+
+export function resolveCodexDisplayPath(rawPath: string, workspacePath?: string): string {
+  const trimmed = rawPath.trim();
+  if (!trimmed) return trimmed;
+  if (/^[A-Za-z]:[/\\]/.test(trimmed) || /^\/[a-zA-Z0-9]/.test(trimmed)) return trimmed;
+  if (!workspacePath) return trimmed;
+  const normalizedWorkspace = workspacePath.replace(/[\\/]+$/, "");
+  const normalizedRelative = trimmed
+    .replace(/^\.[/\\]/, "")
+    .replace(/\//g, "\\")
+    .replace(/^[\\/]+/, "");
+  return `${normalizedWorkspace}\\${normalizedRelative}`;
+}
+
+function PathChip({ path, onOpen }: { path: string; onOpen: (p: string) => void }) {
+  return (
+    <button type="button" className="codex-path-chip" title={path} onClick={() => onOpen(path)}>
+      {pathBasename(path)}
+    </button>
+  );
+}
+
+// Windows absolute path pattern used for bare-text path detection
+const WIN_PATH_RE = /[A-Za-z]:[/\\][^\s"'<>|?\x00-\x1f]*/g;
+
+function addPathLinks(
+  segment: string,
+  onOpenPath: ((p: string) => void) | undefined,
+  parts: React.ReactNode[],
+  getKey: () => number
+) {
+  if (!onOpenPath || !segment) {
+    if (segment) parts.push(segment);
+    return;
+  }
+  WIN_PATH_RE.lastIndex = 0;
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = WIN_PATH_RE.exec(segment)) !== null) {
+    if (m.index > last) parts.push(segment.slice(last, m.index));
+    const raw = m[0];
+    const path = raw.replace(/[.,;:!?)]+$/, "");
+    const trail = raw.slice(path.length);
+    parts.push(<PathChip key={getKey()} path={path} onOpen={onOpenPath} />);
+    if (trail) parts.push(trail);
+    last = m.index + raw.length;
+  }
+  if (last < segment.length) parts.push(segment.slice(last));
+}
+
+export function renderCodexInlineMarkdown(text: string, onOpenPath?: (path: string) => void): React.ReactNode[] {
+  let k = 0;
+  const getKey = () => k++;
+  const parts: React.ReactNode[] = [];
+  const pattern = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(\*[^*\n]+\*)/g;
+  let lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = pattern.exec(text)) !== null) {
+    addPathLinks(text.slice(lastIndex, m.index), onOpenPath, parts, getKey);
+    const str = m[0];
+    if (str[0] === "`") {
+      const inner = str.slice(1, -1);
+      if (onOpenPath && looksLikeFilePath(inner)) {
+        parts.push(<PathChip key={getKey()} path={inner} onOpen={onOpenPath} />);
+      } else {
+        parts.push(<code key={getKey()}>{inner}</code>);
+      }
+    } else if (str.startsWith("**")) {
+      parts.push(<strong key={getKey()}>{str.slice(2, -2)}</strong>);
+    } else {
+      parts.push(<em key={getKey()}>{str.slice(1, -1)}</em>);
+    }
+    lastIndex = m.index + str.length;
+  }
+  addPathLinks(text.slice(lastIndex), onOpenPath, parts, getKey);
+  return parts;
 }
