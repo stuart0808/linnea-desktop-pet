@@ -2037,6 +2037,11 @@ function CodexTerminalWindow({
       }
       return;
     }
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      event.currentTarget.form?.requestSubmit();
+      return;
+    }
     if (event.key === "ArrowUp" || event.key === "ArrowDown") {
       const next = getNextCodexInputHistory(inputHistory, inputHistoryIndex, event.key === "ArrowUp" ? -1 : 1);
       if (next) {
@@ -2435,6 +2440,11 @@ function CodexEmbeddedConversation({
       }
       return;
     }
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      event.currentTarget.form?.requestSubmit();
+      return;
+    }
     if (event.key === "ArrowUp" || event.key === "ArrowDown") {
       const next = getNextCodexInputHistory(inputHistory, inputHistoryIndex, event.key === "ArrowUp" ? -1 : 1);
       if (next) {
@@ -2562,7 +2572,7 @@ function CodexEmbeddedConversation({
           />
         )}
         <div>
-          <input value={input} onKeyDown={handleComposerKeyDown} onChange={(event) => {
+          <textarea value={input} rows={Math.min(10, Math.max(2, input.split(/\r?\n/).length))} onKeyDown={handleComposerKeyDown} onChange={(event) => {
             setInput(event.target.value);
             setInputHistoryIndex(null);
           }} placeholder="输入指令，支持 /model、/review、/compact、@文件名..." />
@@ -2618,8 +2628,8 @@ function CodexSuggestionPicker({
         ))}
       </div>
       <div className="codex-suggestions-footer">
-        <span>Tab 补全</span>
-        <span>Enter 补全当前项</span>
+        <span>Esc 关闭</span>
+        <span>Tab / Enter 补全</span>
       </div>
     </div>
   );

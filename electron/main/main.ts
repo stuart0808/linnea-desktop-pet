@@ -1,7 +1,7 @@
 import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, nativeImage, Notification, screen, shell, Tray, WebContents } from "electron";
 import { randomUUID } from "node:crypto";
 import { spawn as spawnChild, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { cp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { get as httpsGet } from "node:https";
 import { tmpdir } from "node:os";
@@ -58,6 +58,11 @@ let globalSelectionCaptureInFlight = false;
 let selectionPopoverAnchor: { x: number; y: number; placement: "right" | "left" } | null = null;
 let selectionPopoverCaptureId: string | null = null;
 let syntheticKeyboardEventsSuppressedUntil = 0;
+let uiaHelperProcess: ChildProcessWithoutNullStreams | null = null;
+let uiaHelperReady = false;
+let uiaHelperPending: Array<(text: string) => void> = [];
+let uiaHelperBuffer = "";
+let lastGlobalKeyActivityTime = 0;
 interface GitHubReleaseAsset {
   name?: string;
   browser_download_url?: string;
@@ -666,10 +671,151 @@ function compareVersions(left: string, right: string) {
   return 0;
 }
 
+const UIA_HELPER_SCRIPT = [
+  "Add-Type -AssemblyName UIAutomationClient",
+  "Add-Type -TypeDefinition @'",
+  "using System;",
+  "using System.Runtime.InteropServices;",
+  "public class LinneaWinApi {",
+  "    [DllImport(\"user32.dll\")] public static extern IntPtr GetForegroundWindow();",
+  "    [DllImport(\"user32.dll\")] public static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);",
+  "}",
+  "'@",
+  "$tp = [System.Windows.Automation.TextPattern]::Pattern",
+  "Write-Host 'READY'",
+  "[Console]::Out.Flush()",
+  "while ($true) {",
+  "    $line = [Console]::In.ReadLine()",
+  "    if ($null -eq $line) { break }",
+  "    if ($line.Trim() -eq 'GET') {",
+  "        $result = 'EMPTY:'",
+  "        # Step 1: UIA TextPattern (works for most modern apps)",
+  "        try {",
+  "            $el = [System.Windows.Automation.AutomationElement]::FocusedElement",
+  "            if ($null -ne $el) {",
+  "                try {",
+  "                    $pat = $el.GetCurrentPattern($tp)",
+  "                    $ranges = $pat.GetSelection()",
+  "                    if ($ranges.Length -gt 0) {",
+  "                        $text = $ranges[0].GetText(-1)",
+  "                        if ($text.Length -gt 0) {",
+  "                            $b64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($text))",
+  "                            $result = \"TEXT:$b64\"",
+  "                        }",
+  "                    }",
+  "                } catch { }",
+  "            }",
+  "        } catch { }",
+  "        # Step 2: WM_COPY fallback (handles terminals and non-UIA apps, no keyboard events)",
+  "        if ($result -eq 'EMPTY:') {",
+  "            try {",
+  "                $hwnd = [LinneaWinApi]::GetForegroundWindow()",
+  "                if ($hwnd -ne [IntPtr]::Zero) {",
+  "                    $prev = ''",
+  "                    try { $prev = Get-Clipboard -ErrorAction Stop } catch { }",
+  "                    $marker = [System.Guid]::NewGuid().ToString()",
+  "                    try { Set-Clipboard -Value $marker -ErrorAction Stop } catch { }",
+  "                    [LinneaWinApi]::SendMessage($hwnd, 0x0301, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null",
+  "                    Start-Sleep -Milliseconds 80",
+  "                    $copied = ''",
+  "                    try { $copied = Get-Clipboard -ErrorAction Stop } catch { }",
+  "                    if ($copied -ne $marker -and $copied.Length -gt 0) {",
+  "                        $b64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($copied))",
+  "                        $result = \"TEXT:$b64\"",
+  "                    }",
+  "                    try {",
+  "                        if ($prev.Length -gt 0) { Set-Clipboard -Value $prev -ErrorAction Stop }",
+  "                        elseif ($result -eq 'EMPTY:') { Set-Clipboard -Value $marker -ErrorAction Stop }",
+  "                    } catch { }",
+  "                }",
+  "            } catch { }",
+  "        }",
+  "        Write-Host $result",
+  "        [Console]::Out.Flush()",
+  "    }",
+  "}"
+].join("\r\n");
+
+function startUiaHelper() {
+  if (process.platform !== "win32" || uiaHelperProcess) return;
+  try {
+    const scriptPath = join(tmpdir(), "linnea-uia-helper.ps1");
+    writeFileSync(scriptPath, UIA_HELPER_SCRIPT, "utf8");
+    const child = spawnChild("powershell.exe", [
+      "-NonInteractive", "-NoProfile", "-STA", "-ExecutionPolicy", "Bypass", "-File", scriptPath
+    ], { stdio: ["pipe", "pipe", "ignore"] }) as unknown as ChildProcessWithoutNullStreams;
+    uiaHelperProcess = child;
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (data: string) => {
+      uiaHelperBuffer += data;
+      const lines = uiaHelperBuffer.split(/\r?\n/);
+      uiaHelperBuffer = lines.pop() ?? "";
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed === "READY") {
+          uiaHelperReady = true;
+        } else if (trimmed.startsWith("TEXT:")) {
+          const text = Buffer.from(trimmed.slice(5), "base64").toString("utf8");
+          uiaHelperPending.shift()?.(text.slice(0, 8000));
+        } else if (trimmed.startsWith("EMPTY:") || trimmed.startsWith("ERROR:")) {
+          uiaHelperPending.shift()?.("");
+        }
+      }
+    });
+    child.on("exit", () => {
+      uiaHelperProcess = null;
+      uiaHelperReady = false;
+      uiaHelperBuffer = "";
+      for (const resolve of uiaHelperPending.splice(0)) resolve("");
+    });
+  } catch {
+    // UIA helper unavailable, clipboard fallback will be used
+  }
+}
+
+function stopUiaHelper() {
+  if (!uiaHelperProcess) return;
+  try { uiaHelperProcess.kill(); } catch { }
+  uiaHelperProcess = null;
+  uiaHelperReady = false;
+  uiaHelperBuffer = "";
+  for (const resolve of uiaHelperPending.splice(0)) resolve("");
+}
+
+function queryUiaSelectedText(): Promise<string> {
+  if (!uiaHelperProcess || !uiaHelperReady) return Promise.resolve("");
+  return new Promise<string>((resolve) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      const idx = uiaHelperPending.indexOf(resolve);
+      if (idx >= 0) uiaHelperPending.splice(idx, 1);
+      resolve("");
+    }, 500);
+    uiaHelperPending.push((text) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(text);
+    });
+    try {
+      uiaHelperProcess!.stdin.write("GET\n");
+    } catch {
+      settled = true;
+      clearTimeout(timer);
+      uiaHelperPending.pop();
+      resolve("");
+    }
+  });
+}
+
 function registerGlobalSelectionHook() {
   if (process.platform !== "win32" || globalSelectionHookStarted) return;
+  startUiaHelper();
   try {
     const recordKeyboardActivity = (_event: UiohookKeyboardEvent) => {
+      lastGlobalKeyActivityTime = Date.now();
       if (Date.now() < syntheticKeyboardEventsSuppressedUntil) return;
       closePendingSelectionPopover();
     };
@@ -696,13 +842,25 @@ function registerGlobalSelectionHook() {
       const distance = Math.hypot(point.x - start.x, point.y - start.y);
       const duration = Date.now() - start.time;
       if (!start.moved || distance < 10 || duration < 120) return;
-      void openPendingGlobalSelectionCapture(point.x, point.y);
+      void (async () => {
+        const keySnapshot = lastGlobalKeyActivityTime;
+        const text = await queryUiaSelectedText();
+        if (!text || text.length < 2) return;
+        if (lastGlobalKeyActivityTime !== keySnapshot) return;
+        void openPendingGlobalSelectionCapture(point.x, point.y, text);
+      })();
     });
     uIOhook.on("click", (event: UiohookMouseEvent) => {
       if (event.clicks < 2) return;
       const point = normalizeGlobalMousePoint(event.x, event.y);
       if (isPointInsideAppWindow(point.x, point.y)) return;
-      void openPendingGlobalSelectionCapture(point.x, point.y);
+      void (async () => {
+        const keySnapshot = lastGlobalKeyActivityTime;
+        const text = await queryUiaSelectedText();
+        if (!text || text.length < 2) return;
+        if (lastGlobalKeyActivityTime !== keySnapshot) return;
+        void openPendingGlobalSelectionCapture(point.x, point.y, text);
+      })();
     });
     uIOhook.start();
     globalSelectionHookStarted = true;
@@ -713,6 +871,7 @@ function registerGlobalSelectionHook() {
 
 function unregisterGlobalSelectionHook() {
   if (process.platform !== "win32") return;
+  stopUiaHelper();
   try {
     if (globalSelectionHookStarted) uIOhook.stop();
     uIOhook.removeAllListeners("keydown");
@@ -787,10 +946,10 @@ function normalizeGlobalMousePoint(x: number, y: number) {
   return { x, y };
 }
 
-async function openPendingGlobalSelectionCapture(x: number, y: number) {
+async function openPendingGlobalSelectionCapture(x: number, y: number, prefilledText?: string) {
   const capture: SelectionCapture = {
     id: randomUUID(),
-    text: "",
+    text: prefilledText ?? "",
     createdAt: new Date().toISOString()
   };
   selectionCaptures.set(capture.id, capture);
@@ -801,7 +960,13 @@ async function openPendingGlobalSelectionCapture(x: number, y: number) {
 async function resolveSelectionCapture(id: string): Promise<SelectionCapture> {
   const capture = selectionCaptures.get(id);
   if (!capture) throw new Error("Selected text capture not found");
-  if (!pendingSelectionCaptureIds.has(id) && capture.text.trim()) return capture;
+  // UIA already provided the text — return immediately without clipboard simulation
+  if (capture.text.trim()) {
+    pendingSelectionCaptureIds.delete(id);
+    return capture;
+  }
+  // Fallback: clipboard simulation for apps without UIA text pattern support
+  if (!pendingSelectionCaptureIds.has(id)) throw new Error("没有读取到选中文字。");
   const text = await captureGlobalSelectedTextFromActiveSelection();
   if (!text || text.length < 2) throw new Error("没有读取到选中文字。");
   const resolved: SelectionCapture = {
@@ -1623,16 +1788,43 @@ function connectCodexAppSocket(session: CodexRuntimeSession, url: string) {
           capabilities: null
         });
         codexNotify(session, "initialized");
-        const startResult = await codexRequest(session, "thread/start", {
-          cwd: session.workspacePath,
-          approvalPolicy: normalizeCodexApproval(session.startOptions?.approval),
-          sandbox: normalizeCodexSandbox(session.startOptions?.sandbox),
-          sessionStartSource: "startup"
-        }) as { thread?: { id?: string } };
-        session.threadId = startResult.thread?.id;
-        if (!session.threadId) throw new Error("Codex did not return a thread id");
-        session.activeThreadId = session.threadId;
+        const existingThreadId = session.activeThreadId ?? session.threadId;
+        const hasExistingHistory = existingThreadId && !isEmptyCodexHistory(session.threads?.[existingThreadId] ?? session.history);
+        let startResult: { thread?: { id?: string } };
+        if (hasExistingHistory) {
+          try {
+            startResult = await codexRequest(session, "thread/resume", {
+              threadId: existingThreadId,
+              cwd: session.workspacePath,
+              approvalPolicy: normalizeCodexApproval(session.startOptions?.approval),
+              sandbox: normalizeCodexSandbox(session.startOptions?.sandbox),
+              excludeTurns: true
+            }) as { thread?: { id?: string } };
+          } catch {
+            startResult = await codexRequest(session, "thread/start", {
+              cwd: session.workspacePath,
+              approvalPolicy: normalizeCodexApproval(session.startOptions?.approval),
+              sandbox: normalizeCodexSandbox(session.startOptions?.sandbox),
+              sessionStartSource: "startup"
+            }) as { thread?: { id?: string } };
+          }
+        } else {
+          startResult = await codexRequest(session, "thread/start", {
+            cwd: session.workspacePath,
+            approvalPolicy: normalizeCodexApproval(session.startOptions?.approval),
+            sandbox: normalizeCodexSandbox(session.startOptions?.sandbox),
+            sessionStartSource: "startup"
+          }) as { thread?: { id?: string } };
+        }
+        const newThreadId = startResult.thread?.id;
+        if (!newThreadId) throw new Error("Codex did not return a thread id");
         session.threads = session.threads ?? {};
+        if (existingThreadId && existingThreadId !== newThreadId && session.threads[existingThreadId]) {
+          session.threads[newThreadId] = session.threads[newThreadId] ?? session.threads[existingThreadId];
+          delete session.threads[existingThreadId];
+        }
+        session.threadId = newThreadId;
+        session.activeThreadId = session.threadId;
         session.threads[session.threadId] = session.threads[session.threadId] ?? { messages: [], activity: [] };
         session.history = session.threads[session.threadId];
         applyCodexThreadResponseSettings(session.history, startResult);
@@ -1927,6 +2119,7 @@ async function listCodexThreads(sessionId: string) {
     const preview = String(thread.preview ?? "");
     const name = typeof thread.name === "string" ? thread.name : null;
     if (!preview.trim() && isEmptyCodexHistory(session.threads?.[id])) continue;
+    if (id === session.threadId && isEmptyCodexHistory(session.threads?.[id])) continue;
     merged.set(id, {
       id,
       preview,
