@@ -1,5 +1,5 @@
-import { app } from "electron";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { app, safeStorage } from "electron";
+import { copyFile, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { AppSettings, ConversationMessage, ReminderItem, TodoItem } from "../../shared/types.js";
 
@@ -10,6 +10,9 @@ interface PersistedState {
   settings: AppSettings;
   lastAutoSavedTodoId?: string;
 }
+
+// API key fields are stored encrypted separately — never written to the main JSON.
+type SettingsOnDisk = Omit<AppSettings, "aiApiKey" | "openAiApiKey">;
 
 const defaultSettings: AppSettings = {
   aiProvider: "deepseek",
@@ -34,25 +37,44 @@ const defaultSettings: AppSettings = {
 };
 
 export class JsonStore {
-  private state: PersistedState | null = null;
+  private static sharedState: PersistedState | null = null;
   private readonly filePath = join(app.getPath("userData"), "linnea-desktop-pet.json");
+  private readonly keyFilePath = join(app.getPath("userData"), "linnea-api-key.enc");
+  private readonly backupFilePath = `${this.filePath}.bak`;
 
   async load(): Promise<PersistedState> {
-    if (this.state) return this.state;
+    if (JsonStore.sharedState) return JsonStore.sharedState;
 
     try {
-      const raw = await readFile(this.filePath, "utf8");
-      const parsed = JSON.parse(raw) as Partial<PersistedState>;
-      this.state = {
+      const parsed = await this.readPersistedState();
+
+      // Attempt to load the encrypted key first.
+      let apiKey = await this.loadEncryptedApiKey();
+
+      // Migration: if the legacy JSON has a plaintext key and we can encrypt, migrate it now.
+      const legacyKey = (parsed.settings as Partial<AppSettings> | undefined)?.aiApiKey
+        ?? (parsed.settings as Partial<AppSettings> | undefined)?.openAiApiKey;
+      if (legacyKey && !apiKey) {
+        if (safeStorage.isEncryptionAvailable()) {
+          await this.saveEncryptedApiKey(legacyKey);
+          apiKey = legacyKey;
+        } else {
+          apiKey = legacyKey;
+          console.warn("Electron safeStorage is not available; legacy API key is available only until settings are saved.");
+        }
+      }
+
+      JsonStore.sharedState = {
         todos: parsed.todos ?? [],
         reminders: parsed.reminders ?? [],
         messages: parsed.messages ?? [],
-        settings: normalizeSettings({ ...defaultSettings, ...parsed.settings }),
+        settings: normalizeSettings({ ...defaultSettings, ...parsed.settings, aiApiKey: apiKey }),
         lastAutoSavedTodoId: parsed.lastAutoSavedTodoId
       };
+      // Persist immediately to strip plaintext key from JSON (migration) and normalise.
       await this.save();
     } catch {
-      this.state = {
+      JsonStore.sharedState = {
         todos: [],
         reminders: [],
         messages: [],
@@ -61,7 +83,7 @@ export class JsonStore {
       await this.save();
     }
 
-    return this.state;
+    return JsonStore.sharedState;
   }
 
   async snapshot(): Promise<PersistedState> {
@@ -70,17 +92,52 @@ export class JsonStore {
   }
 
   async save(): Promise<void> {
-    if (!this.state) return;
+    if (!JsonStore.sharedState) return;
     await mkdir(dirname(this.filePath), { recursive: true });
-    await writeFile(this.filePath, JSON.stringify(this.state, null, 2), "utf8");
+
+    // Strip API key fields — these live in the encrypted key file only.
+    const { aiApiKey: _a, openAiApiKey: _b, ...settingsOnDisk } = JsonStore.sharedState.settings;
+    const payload: Omit<PersistedState, "settings"> & { settings: SettingsOnDisk } = {
+      ...JsonStore.sharedState,
+      settings: settingsOnDisk as SettingsOnDisk
+    };
+
+    // Atomic write: write to .tmp then rename, keeping .bak for crash recovery.
+    const tmpPath = `${this.filePath}.tmp`;
+    await writeFile(tmpPath, JSON.stringify(payload, null, 2), "utf8");
+    // Best-effort backup of the previous version.
+    try {
+      await copyFile(this.filePath, this.backupFilePath);
+    } catch {
+      // No previous file yet — fine.
+    }
+    await rename(tmpPath, this.filePath);
   }
 
   async getSettings(): Promise<AppSettings> {
-    return (await this.load()).settings;
+    const settings = (await this.load()).settings;
+    // Re-read encrypted key in case it changed outside this session (unlikely, but correct).
+    if (!settings.aiApiKey) {
+      const key = await this.loadEncryptedApiKey();
+      if (key) return { ...settings, aiApiKey: key, openAiApiKey: key };
+    }
+    return settings;
   }
 
   async updateSettings(patch: Partial<AppSettings>): Promise<AppSettings> {
     const state = await this.load();
+
+    // Handle API key separately via encrypted storage.
+    if ("aiApiKey" in patch || "openAiApiKey" in patch) {
+      const key = patch.aiApiKey ?? patch.openAiApiKey ?? undefined;
+      if (key?.trim()) {
+        await this.saveEncryptedApiKey(key.trim());
+      } else {
+        await this.clearEncryptedApiKey();
+      }
+      // Keep in-memory state consistent.
+    }
+
     state.settings = normalizeSettings({ ...state.settings, ...patch });
     await this.save();
     return state.settings;
@@ -184,6 +241,58 @@ export class JsonStore {
     state.reminders = state.reminders.filter((item) => item.todoId !== todoId);
     if (reminder) state.reminders.unshift(reminder);
     await this.save();
+  }
+
+  // ── Encrypted key helpers ───────────────────────────────────────────────────
+
+  private async loadEncryptedApiKey(): Promise<string | undefined> {
+    if (!safeStorage.isEncryptionAvailable()) return undefined;
+    try {
+      const buf = await readFile(this.keyFilePath);
+      return safeStorage.decryptString(buf);
+    } catch {
+      return undefined;
+    }
+  }
+
+  private async saveEncryptedApiKey(key: string): Promise<void> {
+    if (!safeStorage.isEncryptionAvailable()) {
+      throw new Error("当前系统环境不支持安全保存 API Key。请改用环境变量，或在本次会话中临时测试。");
+    }
+    const encrypted = safeStorage.encryptString(key);
+    const tmpPath = `${this.keyFilePath}.tmp`;
+    await writeFile(tmpPath, encrypted);
+    try {
+      await rename(this.keyFilePath, `${this.keyFilePath}.bak`);
+    } catch {
+      // No previous key file yet.
+    }
+    await rename(tmpPath, this.keyFilePath);
+  }
+
+  private async clearEncryptedApiKey(): Promise<void> {
+    try {
+      await unlink(this.keyFilePath);
+    } catch {
+      // Already absent.
+    }
+  }
+
+  private async readPersistedState(): Promise<Partial<PersistedState>> {
+    try {
+      const raw = await readFile(this.filePath, "utf8");
+      return JSON.parse(raw) as Partial<PersistedState>;
+    } catch (primaryError) {
+      try {
+        const backupRaw = await readFile(this.backupFilePath, "utf8");
+        const backup = JSON.parse(backupRaw) as Partial<PersistedState>;
+        await writeFile(this.filePath, JSON.stringify(backup, null, 2), "utf8");
+        console.warn("Recovered Linnea state from backup after primary state read failed.", primaryError);
+        return backup;
+      } catch {
+        throw primaryError;
+      }
+    }
   }
 }
 
