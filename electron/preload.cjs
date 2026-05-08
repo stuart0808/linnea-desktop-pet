@@ -38,9 +38,14 @@ const api = {
     retranslate: (id, targetLanguage) => ipcRenderer.invoke("selection:retranslate", id, targetLanguage),
     getResult: (id) => ipcRenderer.invoke("selection:getResult", id),
     getCapture: (id) => ipcRenderer.invoke("selection:getCapture", id),
+    resolveCapture: (id) => ipcRenderer.invoke("selection:resolveCapture", id),
     openCapturePopover: (text, clientX, clientY) => ipcRenderer.invoke("selection:openCapturePopover", text, clientX, clientY),
     resizePopover: (expanded) => ipcRenderer.invoke("selection:resizePopover", expanded),
-    createTodoFromCapture: (id) => ipcRenderer.invoke("selection:createTodoFromCapture", id)
+    createTodoFromCapture: (id) => ipcRenderer.invoke("selection:createTodoFromCapture", id),
+    addAskCapture: (id) => ipcRenderer.invoke("selection:addAskCapture", id),
+    getAskDraft: () => ipcRenderer.invoke("selection:getAskDraft"),
+    clearAskDraft: () => ipcRenderer.invoke("selection:clearAskDraft"),
+    submitAskDraft: () => ipcRenderer.invoke("selection:submitAskDraft")
   },
   codex: {
     createSession: (items, options) => ipcRenderer.invoke("codex:createSession", items, options),

@@ -172,7 +172,7 @@ input {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 4px;
+  gap: 3px;
   border: 1px solid var(--workspace-border);
   border-radius: 7px;
   padding: 7px 6px;
@@ -717,7 +717,7 @@ input {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  margin-left: 4px;
+  margin-left: 2px;
   opacity: 0;
   transform: translateX(-6px);
   pointer-events: none;
@@ -742,7 +742,7 @@ input {
   gap: 4px;
   border: 0;
   border-radius: 999px;
-  padding: 0 9px;
+  padding: 0 7px;
   background: transparent;
   color: #25413e;
   cursor: pointer;
@@ -853,7 +853,10 @@ input {
   --workspace-content-bg: rgba(255, 255, 255, .5);
   --workspace-border: rgba(40, 66, 63, .16);
   --workspace-shadow: rgba(21, 40, 38, .16);
-  width: 100%;
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 38px;
   height: 100%;
   display: inline-flex;
   align-items: center;
@@ -867,9 +870,28 @@ input {
   transition: max-width .2s ease, background .2s ease, border-color .2s ease, box-shadow .2s ease;
 }
 
+.global-selection-popover-shell.expand-right {
+  left: 0;
+  right: auto;
+}
+
+.global-selection-popover-shell.expand-left {
+  left: auto;
+  right: 0;
+  flex-direction: row-reverse;
+  transform-origin: right center;
+}
+
+.global-selection-popover-shell.expand-left .selection-toolbar {
+  margin-left: 0;
+  margin-right: 2px;
+  transform: translateX(6px);
+}
+
 .global-selection-popover-shell:hover,
 .global-selection-popover-shell:focus-within {
-  max-width: 252px;
+  width: 100%;
+  max-width: 372px;
   border-color: var(--workspace-border);
   background: var(--workspace-card-bg);
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .5);
@@ -3977,6 +3999,15 @@ input {
   font-size: 13px;
 }
 
+.codex-thinking-message {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  color: #5a6d69;
+  font-size: 13px;
+}
+
 .codex-markdown {
   display: grid;
   gap: 8px;
@@ -4382,7 +4413,8 @@ input {
   gap: 8px;
 }
 
-.codex-composer input {
+.codex-composer input,
+.codex-composer textarea {
   min-width: 0;
   border: 1px solid var(--workspace-border);
   border-radius: 7px;
@@ -4390,6 +4422,14 @@ input {
   background: #fff;
   color: #223031;
   outline: none;
+}
+
+.codex-composer textarea {
+  min-height: 40px;
+  max-height: 240px;
+  resize: vertical;
+  line-height: 1.45;
+  font-family: inherit;
 }
 
 .codex-suggestions {

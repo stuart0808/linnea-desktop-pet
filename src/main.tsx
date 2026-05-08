@@ -1,7 +1,7 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
 import { AlertTriangle, BarChart3, Bell, CalendarDays, Check, Clock, FileText, FolderOpen, Image as ImageIcon, Inbox, KeyRound, Languages, ListTodo, MessageCircle, Paperclip, Pencil, RotateCcw, Save, Search, Send, Settings, Sparkles, Square, Tag, Trash2, X } from "lucide-react";
-import type { AppSettings, CodexApprovalPolicy, CodexDropItem, CodexModelSummary, CodexReasoningEffort, CodexSandboxPolicy, CodexSavedSession, CodexSessionInfo, CodexThreadSettings, CodexThreadSummary, CodexUiActivity, CodexUiMessage, ConversationMessage, DesktopPetApi, PetMood, PlanProposal, ReminderItem, SelectionCapture, SelectionTextResult, TodoCandidate, TodoItem, TodoPriority } from "../shared/types";
+import type { AppSettings, CodexApprovalPolicy, CodexDropItem, CodexModelSummary, CodexReasoningEffort, CodexSandboxPolicy, CodexSavedSession, CodexSessionInfo, CodexThreadSettings, CodexThreadSummary, CodexUiActivity, CodexUiMessage, ConversationMessage, DesktopPetApi, PetMood, PlanProposal, ReminderItem, SelectionAskDraft, SelectionCapture, SelectionTextResult, TodoCandidate, TodoItem, TodoPriority } from "../shared/types";
 import confusedImage from "./assets/pet/linnea_state/_Confused_.png";
 import draggingImage from "./assets/pet/linnea_state/_Dragging_.png";
 import happyImage from "./assets/pet/linnea_state/_Happy_.png";
@@ -16,7 +16,7 @@ import "./styles.css";
 
 type PetVisualState = PetMood | "confused" | "dragging" | "urgent" | "rest" | "sleepy";
 type LocalPetMood = PetMood | "confused";
-type SelectionAction = "summarize" | "translate" | "todo";
+type SelectionAction = "summarize" | "translate" | "todo" | "ask" | "ask-submit";
 
 const petStateImages: Record<PetVisualState, string> = {
   idle: idleImage,
@@ -82,8 +82,10 @@ function App() {
   const isCodexWindow = windowMode === "codex";
   const selectionResultId = searchParams.get("id") ?? "";
   const selectionCaptureId = searchParams.get("id") ?? "";
+  const selectionPopoverPlacement = searchParams.get("placement") === "left" ? "left" : "right";
   const codexSessionId = searchParams.get("id") ?? "";
   const codexInitialPrompt = searchParams.get("prompt") ?? "";
+  const codexInitialDraft = searchParams.get("draft") ?? "";
   const codexInitialSandbox = normalizeCodexSandbox(searchParams.get("sandbox"));
   const codexInitialApproval = normalizeCodexApproval(searchParams.get("approval"));
   const api = window.desktopPet;
@@ -153,7 +155,7 @@ function App() {
   }
 
   if (isSelectionPopoverWindow) {
-    return <GlobalSelectionPopoverWindow api={api} captureId={selectionCaptureId} themeStyle={themeStyle} />;
+    return <GlobalSelectionPopoverWindow api={api} captureId={selectionCaptureId} placement={selectionPopoverPlacement} themeStyle={themeStyle} />;
   }
 
   if (isCodexWindow) {
@@ -162,6 +164,7 @@ function App() {
         api={api}
         sessionId={codexSessionId}
         initialPrompt={codexInitialPrompt}
+        initialDraft={codexInitialDraft}
         sandbox={codexInitialSandbox}
         approval={codexInitialApproval}
         themeStyle={themeStyle}
@@ -475,7 +478,7 @@ function App() {
   }
 
   function updateSelectionPopover(mousePosition?: { x: number; y: number }) {
-    if (!api || !isWorkspaceWindow) return;
+    if (!api) return;
     window.setTimeout(() => {
       const capture = getWorkspaceSelectedText();
       if (!capture) return;
@@ -1793,6 +1796,7 @@ function CodexTerminalWindow({
   api,
   sessionId,
   initialPrompt,
+  initialDraft,
   sandbox,
   approval,
   themeStyle
@@ -1800,6 +1804,7 @@ function CodexTerminalWindow({
   api?: DesktopPetApi;
   sessionId: string;
   initialPrompt: string;
+  initialDraft: string;
   sandbox: CodexSandboxPolicy;
   approval: CodexApprovalPolicy;
   themeStyle: React.CSSProperties;
@@ -1818,6 +1823,7 @@ function CodexTerminalWindow({
   const [activity, setActivity] = React.useState<CodexUiActivity[]>([]);
   const [requests, setRequests] = React.useState<Array<{ id: number | string; method: string; params: any }>>([]);
   const [rawEvents, setRawEvents] = React.useState<string[]>([]);
+  const [responding, setResponding] = React.useState(false);
   const [models, setModels] = React.useState<CodexModelSummary[]>([]);
   const [resumeThreads, setResumeThreads] = React.useState<CodexThreadSummary[]>([]);
   const [resumeBusy, setResumeBusy] = React.useState(false);
@@ -1829,6 +1835,10 @@ function CodexTerminalWindow({
   React.useEffect(() => {
     setSuggestionIndex(0);
   }, [input, suggestions.length]);
+
+  React.useEffect(() => {
+    if (initialDraft && !input.trim()) setInput(initialDraft);
+  }, [initialDraft]);
 
   React.useEffect(() => {
     if (!api || !sessionId) return;
@@ -1891,7 +1901,8 @@ function CodexTerminalWindow({
         setRequests,
         setRawEvents,
         setStatus,
-        setStatusText
+        setStatusText,
+        setResponding
       });
     });
     return off;
@@ -1899,7 +1910,7 @@ function CodexTerminalWindow({
 
   React.useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
-  }, [messages.length, activity.length, requests.length]);
+  }, [messages.length, activity.length, requests.length, responding]);
 
   async function saveSession() {
     if (!api || saving || !session) return;
@@ -1989,7 +2000,7 @@ function CodexTerminalWindow({
     }
   }
 
-  function handleComposerKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
+  function handleComposerKeyDown(event: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) {
     if (resumeThreads.length) {
       if (event.key === "ArrowDown") {
         event.preventDefault();
@@ -2057,6 +2068,7 @@ function CodexTerminalWindow({
         setStatusText
       });
       if (handledCommand) return;
+      setResponding(true);
       await api.codex.sendInput(sessionId, text);
     } catch (error) {
       setStatus("error");
@@ -2071,7 +2083,31 @@ function CodexTerminalWindow({
   }
 
   return (
-    <main className="codex-window" style={themeStyle}>
+    <main
+      className="codex-window"
+      style={themeStyle}
+      onMouseUpCapture={(event) => {
+        if (isSelectionPopoverBlockedTarget(event.target)) return;
+        window.setTimeout(() => {
+          const capture = getWorkspaceSelectedText();
+          if (!capture) return;
+          void api?.selection.openCapturePopover(capture.text, event.clientX, event.clientY).catch(() => undefined);
+        }, 0);
+      }}
+      onKeyUpCapture={(event) => {
+        if (isSelectionPopoverBlockedTarget(event.target)) return;
+        window.setTimeout(() => {
+          const capture = getWorkspaceSelectedText();
+          if (!capture) return;
+          const rect = capture.rect;
+          void api?.selection.openCapturePopover(
+            capture.text,
+            rect ? rect.left + rect.width / 2 : window.innerWidth / 2,
+            rect ? rect.bottom : window.innerHeight / 2
+          ).catch(() => undefined);
+        }, 0);
+      }}
+    >
       <header className="codex-window-header">
         <div>
           <strong>Linnea Codex</strong>
@@ -2082,7 +2118,7 @@ function CodexTerminalWindow({
       </header>
       <section className="codex-window-body">
         <aside className="codex-session-panel">
-          <strong>副本文件</strong>
+          <strong>{session?.copiedItems.length ? "副本文件" : "临时提问"}</strong>
           <div className="codex-session-items">
             {session?.copiedItems.map((item) => (
               <div key={item.copiedPath}>
@@ -2124,6 +2160,7 @@ function CodexTerminalWindow({
             {requests.map((request) => (
               <CodexRequestCard key={request.id} request={request} onResolve={(response) => void resolveRequest(request.id, response)} />
             ))}
+            {responding && <CodexThinkingMessage />}
             <details className="codex-activity-log">
               <summary>活动详情 {activity.length ? `(${activity.length})` : ""}</summary>
               <div>
@@ -2165,7 +2202,7 @@ function CodexTerminalWindow({
               />
             )}
             <div>
-              <input value={input} onKeyDown={handleComposerKeyDown} onChange={(event) => {
+              <textarea value={input} rows={Math.min(10, Math.max(2, input.split(/\r?\n/).length))} onKeyDown={handleComposerKeyDown} onChange={(event) => {
                 setInput(event.target.value);
                 setInputHistoryIndex(null);
               }} placeholder="输入指令，支持 /model、/review、/compact、@文件名..." />
@@ -2206,6 +2243,7 @@ function CodexEmbeddedConversation({
   const [activity, setActivity] = React.useState<CodexUiActivity[]>(sessionInfo.history?.activity ?? []);
   const [requests, setRequests] = React.useState<Array<{ id: number | string; method: string; params: any }>>([]);
   const [rawEvents, setRawEvents] = React.useState<string[]>([]);
+  const [responding, setResponding] = React.useState(false);
   const [models, setModels] = React.useState<CodexModelSummary[]>([]);
   const [resumeThreads, setResumeThreads] = React.useState<CodexThreadSummary[]>([]);
   const [resumeBusy, setResumeBusy] = React.useState(false);
@@ -2225,6 +2263,7 @@ function CodexEmbeddedConversation({
     setActivity(sessionInfo.history?.activity ?? []);
     setRequests([]);
     setRawEvents([]);
+    setResponding(false);
     setStatus("starting");
     setStatusText("Codex 未启动");
     startedRef.current = false;
@@ -2270,7 +2309,8 @@ function CodexEmbeddedConversation({
         setRequests,
         setRawEvents,
         setStatus,
-        setStatusText
+        setStatusText,
+        setResponding
       });
     });
     return off;
@@ -2278,7 +2318,7 @@ function CodexEmbeddedConversation({
 
   React.useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
-  }, [messages.length, activity.length, requests.length]);
+  }, [messages.length, activity.length, requests.length, responding]);
 
   async function sendMessage(event: React.FormEvent) {
     event.preventDefault();
@@ -2308,6 +2348,7 @@ function CodexEmbeddedConversation({
         setStatus("running");
         setStatusText("Codex 已连接");
       }
+      setResponding(true);
       await api.codex.sendInput(session.id, text);
     } catch (error) {
       setStatus("error");
@@ -2357,7 +2398,7 @@ function CodexEmbeddedConversation({
     }
   }
 
-  function handleComposerKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
+  function handleComposerKeyDown(event: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) {
     if (resumeThreads.length) {
       if (event.key === "ArrowDown") {
         event.preventDefault();
@@ -2479,6 +2520,7 @@ function CodexEmbeddedConversation({
         {requests.map((request) => (
           <CodexRequestCard key={request.id} request={request} onResolve={(response) => void resolveRequest(request.id, response)} />
         ))}
+        {responding && <CodexThinkingMessage />}
         <details className="codex-activity-log">
           <summary>活动详情 {activity.length ? `(${activity.length})` : ""}</summary>
           <div>
@@ -2579,6 +2621,15 @@ function CodexSuggestionPicker({
         <span>Tab 补全</span>
         <span>Enter 补全当前项</span>
       </div>
+    </div>
+  );
+}
+
+function CodexThinkingMessage() {
+  return (
+    <div className="codex-chat-message assistant codex-thinking-message">
+      <span className="typing-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+      <span>Codex 正在输出...</span>
     </div>
   );
 }
@@ -2775,23 +2826,27 @@ function applyCodexUiEvent(
     setRawEvents: React.Dispatch<React.SetStateAction<string[]>>;
     setStatus: React.Dispatch<React.SetStateAction<"starting" | "running" | "exited" | "error">>;
     setStatusText: React.Dispatch<React.SetStateAction<string>>;
+    setResponding: React.Dispatch<React.SetStateAction<boolean>>;
   }
 ) {
   const method = payload?.method;
   state.setRawEvents((current) => [...current.slice(-80), JSON.stringify(payload)]);
   if (kind === "request") {
+    state.setResponding(false);
     state.setRequests((current) => [...current, { id: payload.id, method, params: payload.params }]);
     return;
   }
   if (kind === "error") {
     state.setStatus("error");
     state.setStatusText(payload?.params?.message ?? payload?.message ?? "Codex 出错");
+    state.setResponding(false);
     return;
   }
   if (method === "thread/status/changed") {
     const status = payload.params?.status?.type ?? "running";
     state.setStatus(status === "idle" ? "running" : "running");
     state.setStatusText(status === "idle" ? "Codex 空闲" : "Codex 正在处理");
+    state.setResponding(status !== "idle");
     return;
   }
   if (kind === "thread") {
@@ -2806,19 +2861,23 @@ function applyCodexUiEvent(
     else if (status === "socketClosed") {
       state.setStatus("exited");
       state.setStatusText("Codex 连接已关闭");
+      state.setResponding(false);
     } else if (status === "stopped") {
       state.setStatus("exited");
       state.setStatusText("Codex 已停止");
+      state.setResponding(false);
     }
     else if (status === "exited") {
       state.setStatus("exited");
       state.setStatusText("Codex app-server 已退出");
+      state.setResponding(false);
     }
     return;
   }
   if (method === "item/started" || method === "item/completed") {
     const item = payload.params?.item;
     if (!item?.id) return;
+    if (method === "item/started" && item.type !== "userMessage") state.setResponding(true);
     if (item.type === "userMessage") {
       const text = stripCodexPlanModeInstruction((item.content ?? []).map((part: any) => part.text).filter(Boolean).join("\n"));
       upsertCodexMessage(state.setMessages, item.id, "user", text);
@@ -2839,13 +2898,17 @@ function applyCodexUiEvent(
     return;
   }
   if (method === "item/agentMessage/delta") {
+    state.setResponding(true);
     appendCodexMessage(state.setMessages, payload.params.itemId, "assistant", payload.params.delta ?? "");
   } else if (method === "item/commandExecution/outputDelta" || method === "command/exec/outputDelta") {
+    state.setResponding(true);
     appendCodexActivity(state.setActivity, payload.params.itemId ?? payload.params.commandId ?? crypto.randomUUID(), "command", "命令输出", payload.params.delta ?? "");
   } else if (method === "item/fileChange/patchUpdated") {
+    state.setResponding(true);
     upsertCodexActivity(state.setActivity, payload.params.itemId, "file", "文件变更", JSON.stringify(payload.params.changes ?? [], null, 2), "待确认");
   } else if (method === "turn/completed") {
     state.setStatusText("Codex 空闲");
+    state.setResponding(false);
   }
 }
 
@@ -3435,7 +3498,31 @@ function SelectionResultWindow({
   }
 
   return (
-    <main className="selection-result-shell" style={themeStyle}>
+    <main
+      className="selection-result-shell"
+      style={themeStyle}
+      onMouseUpCapture={(event) => {
+        if (isSelectionPopoverBlockedTarget(event.target)) return;
+        window.setTimeout(() => {
+          const capture = getWorkspaceSelectedText();
+          if (!capture) return;
+          void api?.selection.openCapturePopover(capture.text, event.clientX, event.clientY).catch(() => undefined);
+        }, 0);
+      }}
+      onKeyUpCapture={(event) => {
+        if (isSelectionPopoverBlockedTarget(event.target)) return;
+        window.setTimeout(() => {
+          const capture = getWorkspaceSelectedText();
+          if (!capture) return;
+          const rect = capture.rect;
+          void api?.selection.openCapturePopover(
+            capture.text,
+            rect ? rect.left + rect.width / 2 : window.innerWidth / 2,
+            rect ? rect.bottom : window.innerHeight / 2
+          ).catch(() => undefined);
+        }, 0);
+      }}
+    >
       <header className="selection-result-header">
         <div className="selection-result-title">
           <strong>{result?.title ?? "Linnea"}</strong>
@@ -3475,14 +3562,17 @@ function SelectionResultWindow({
 function GlobalSelectionPopoverWindow({
   api,
   captureId,
+  placement,
   themeStyle
 }: {
   api?: DesktopPetApi;
   captureId: string;
+  placement: "right" | "left";
   themeStyle: React.CSSProperties;
 }) {
   const [capture, setCapture] = React.useState<SelectionCapture | null>(null);
   const [busyAction, setBusyAction] = React.useState<SelectionAction | null>(null);
+  const [askDraft, setAskDraft] = React.useState<SelectionAskDraft>({ count: 0, text: "" });
   const [error, setError] = React.useState("");
 
   React.useEffect(() => {
@@ -3500,6 +3590,7 @@ function GlobalSelectionPopoverWindow({
         else setError("选区已失效");
       })
       .catch(() => setError("读取选区失败"));
+    void api.selection.getAskDraft().then(setAskDraft).catch(() => undefined);
   }, [api, captureId]);
 
   React.useEffect(() => {
@@ -3519,13 +3610,26 @@ function GlobalSelectionPopoverWindow({
     setBusyAction(action);
     setError("");
     try {
+      const resolvedCapture = await api.selection.resolveCapture(capture.id);
+      setCapture(resolvedCapture);
       if (action === "todo") {
-        await api.selection.createTodoFromCapture(capture.id);
+        await api.selection.createTodoFromCapture(resolvedCapture.id);
+      } else if (action === "ask") {
+        setAskDraft(await api.selection.addAskCapture(resolvedCapture.id));
+        setBusyAction(null);
+        return;
+      } else if (action === "ask-submit") {
+        if (askDraft.count === 0) await api.selection.addAskCapture(resolvedCapture.id);
+        await api.selection.submitAskDraft();
       } else {
-        await api.selection.process(action, capture.text);
+        await api.selection.process(action, resolvedCapture.text);
       }
       window.close();
     } catch (reason) {
+      if (reason instanceof Error && /没有读取到选中文字|Selected text is empty/i.test(reason.message)) {
+        window.close();
+        return;
+      }
       setError(reason instanceof Error ? reason.message : "处理失败");
       setBusyAction(null);
     }
@@ -3533,7 +3637,7 @@ function GlobalSelectionPopoverWindow({
 
   return (
     <main
-      className="global-selection-popover-shell"
+      className={`global-selection-popover-shell ${placement === "left" ? "expand-left" : "expand-right"}`}
       style={themeStyle}
       onMouseEnter={() => void api?.selection.resizePopover(true)}
       onMouseLeave={() => void api?.selection.resizePopover(false)}
@@ -3561,8 +3665,11 @@ function GlobalSelectionPopoverWindow({
             <button type="button" title="生成待办" disabled={!capture || Boolean(busyAction)} onClick={() => void runAction("todo")}>
               <ListTodo size={14} /> {busyAction === "todo" ? "整理中..." : "待办"}
             </button>
-            <button type="button" title="关闭" aria-label="关闭" onClick={() => window.close()}>
-              <X size={14} />
+            <button type="button" title="加入提问" disabled={!capture || Boolean(busyAction)} onClick={() => void runAction("ask")}>
+              <MessageCircle size={14} /> {busyAction === "ask" ? "加入中..." : `加入${askDraft.count ? ` ${askDraft.count}` : ""}`}
+            </button>
+            <button type="button" title="提交提问" disabled={!capture || Boolean(busyAction)} onClick={() => void runAction("ask-submit")}>
+              <Sparkles size={14} /> {busyAction === "ask-submit" ? "打开中..." : "提问"}
             </button>
           </div>
         </>

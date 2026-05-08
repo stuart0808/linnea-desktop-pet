@@ -148,6 +148,11 @@ export interface SelectionCapture {
   createdAt: string;
 }
 
+export interface SelectionAskDraft {
+  count: number;
+  text: string;
+}
+
 export type CodexSandboxPolicy = "read-only" | "workspace-write" | "danger-full-access";
 export type CodexApprovalPolicy = "on-request" | "never";
 
@@ -305,9 +310,14 @@ export interface DesktopPetApi {
     retranslate(id: string, targetLanguage: string): Promise<SelectionTextResult>;
     getResult(id: string): Promise<SelectionTextResult | null>;
     getCapture(id: string): Promise<SelectionCapture | null>;
+    resolveCapture(id: string): Promise<SelectionCapture>;
     openCapturePopover(text: string, clientX: number, clientY: number): Promise<void>;
     resizePopover(expanded: boolean): Promise<void>;
     createTodoFromCapture(id: string): Promise<void>;
+    addAskCapture(id: string): Promise<SelectionAskDraft>;
+    getAskDraft(): Promise<SelectionAskDraft>;
+    clearAskDraft(): Promise<void>;
+    submitAskDraft(): Promise<void>;
   };
   codex: {
     createSession(items: CodexDropItem[], options: CodexCreateSessionOptions): Promise<CodexSessionInfo>;
