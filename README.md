@@ -26,13 +26,6 @@ Windows 安装包由 `electron-builder` 生成，文件名为：
 Linnea Setup 1.0.2.exe
 ```
 
-GitHub Release 草稿创建后，可手动上传安装包和可选 blockmap：
-
-```text
-release/Linnea Setup 1.0.2.exe
-release/Linnea Setup 1.0.2.exe.blockmap
-```
-
 ## Usage
 
 启动后，桌面上会出现 Linnea 桌宠：
