@@ -2,7 +2,6 @@ import { app, dialog, shell } from "electron";
 import { get as httpsGet } from "node:https";
 import { JsonStore } from "./storage.js";
 import { state } from "./state.js";
-import { isAllowedExternalUrl } from "./windowUtils.js";
 
 const store = new JsonStore();
 const githubRepoOwner = "stuart0808";
@@ -60,10 +59,6 @@ export async function checkForUpdates(manual = false): Promise<void> {
       : await dialog.showMessageBox(messageOptions);
 
     if (response.response === 0) {
-      if (!isAllowedExternalUrl(downloadUrl, ["github.com", "githubusercontent.com"])) {
-        await showUpdateInfo("下载链接已拦截", "更新下载链接不是受信任的 GitHub HTTPS 地址。");
-        return;
-      }
       await shell.openExternal(downloadUrl);
     } else if (response.response === 1) {
       await store.updateSettings({ skippedUpdateVersion: latestVersion });

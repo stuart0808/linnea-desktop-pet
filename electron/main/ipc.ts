@@ -36,7 +36,7 @@ import {
 } from "./codex.js";
 import {
   setPetWindowExpanded, openWorkspaceWindow, openSelectionResultWindow,
-  processSelectionResultInBackground, openSelectionPopoverWindow, resizeSelectionPopoverWindow,
+  processSelectionResultInBackground, resizeSelectionPopoverWindow,
   resolveAiConfig, beginWindowDrag, dragWindowToCursor, endWindowDrag, registerQuickAiRecordShortcut
 } from "./window.js";
 import { checkForUpdates } from "./updates.js";
@@ -208,7 +208,9 @@ async function scanPetAppearanceFolder(directory: string): Promise<PetAppearance
 export function registerIpc(): void {
   ipcMain.handle("app:snapshot", () => store.snapshot());
   ipcMain.handle("app:setIgnoreMouseEvents", (_event, ignore: unknown) => {
-    state.mainWindow?.setIgnoreMouseEvents(validateBoolean(ignore, "ignore"), { forward: true });
+    const ignoreValue = validateBoolean(ignore, "ignore");
+    state.mainWindow?.setIgnoreMouseEvents(ignoreValue, { forward: true });
+    state.mainWindowIgnoringMouseEvents = ignoreValue;
   });
   ipcMain.handle("app:moveWindowBy", (_event, deltaX: unknown, deltaY: unknown) => {
     const targetWindow = BrowserWindow.fromWebContents(_event.sender) ?? state.mainWindow;
@@ -458,24 +460,6 @@ export function registerIpc(): void {
   ipcMain.handle("selection:getResult", (_event, id: unknown) => state.selectionResults.get(validateStringId(id)) ?? null);
   ipcMain.handle("selection:getCapture", (_event, id: unknown) => state.selectionCaptures.get(validateStringId(id)) ?? null);
   ipcMain.handle("selection:resolveCapture", (_event, id: unknown) => resolveSelectionCapture(validateStringId(id)));
-  ipcMain.handle("selection:openCapturePopover", async (_event, text: unknown, clientX: unknown, clientY: unknown) => {
-    const trimmed = validateSelectedText(text);
-    if (trimmed.length < 2) return;
-    const senderWindow = BrowserWindow.fromWebContents(_event.sender);
-    if (!senderWindow || senderWindow.isDestroyed()) return;
-    const contentBounds = senderWindow.getContentBounds();
-    const rawClientX = typeof clientX === "number" && Number.isFinite(clientX) ? clientX : undefined;
-    const rawClientY = typeof clientY === "number" && Number.isFinite(clientY) ? clientY : undefined;
-    const anchorX = rawClientX === undefined ? contentBounds.x + contentBounds.width / 2 : contentBounds.x + rawClientX;
-    const anchorY = rawClientY === undefined ? contentBounds.y + contentBounds.height / 2 : contentBounds.y + rawClientY;
-    const capture = {
-      id: randomUUID(),
-      text: trimmed.slice(0, 8000),
-      createdAt: new Date().toISOString()
-    };
-    state.selectionCaptures.set(capture.id, capture);
-    await openSelectionPopoverWindow(capture, anchorX, anchorY);
-  });
   ipcMain.handle("selection:resizePopover", (_event, expanded: unknown) => resizeSelectionPopoverWindow(validateBoolean(expanded, "expanded")));
   ipcMain.handle("selection:createTodoFromCapture", async (_event, id: unknown) => {
     const capture = await resolveSelectionCapture(validateStringId(id));

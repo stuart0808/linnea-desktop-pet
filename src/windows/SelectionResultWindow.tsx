@@ -1,6 +1,5 @@
 import React from "react";
 import type { DesktopPetApi, SelectionTextResult } from "../../shared/types";
-import { getWorkspaceSelectedText, isSelectionPopoverBlockedTarget } from "../utils/domHelpers";
 
 const translationLanguageOptions = [
   { value: "auto", label: "自动" },
@@ -151,27 +150,6 @@ export function SelectionResultWindow({
     <main
       className="selection-result-shell"
       style={themeStyle}
-      onMouseUpCapture={(event) => {
-        if (isSelectionPopoverBlockedTarget(event.target)) return;
-        window.setTimeout(() => {
-          const capture = getWorkspaceSelectedText();
-          if (!capture) return;
-          void api?.selection.openCapturePopover(capture.text, event.clientX, event.clientY).catch(() => undefined);
-        }, 0);
-      }}
-      onKeyUpCapture={(event) => {
-        if (isSelectionPopoverBlockedTarget(event.target)) return;
-        window.setTimeout(() => {
-          const capture = getWorkspaceSelectedText();
-          if (!capture) return;
-          const rect = capture.rect;
-          void api?.selection.openCapturePopover(
-            capture.text,
-            rect ? rect.left + rect.width / 2 : window.innerWidth / 2,
-            rect ? rect.bottom : window.innerHeight / 2
-          ).catch(() => undefined);
-        }, 0);
-      }}
     >
       <header className="selection-result-header">
         <div className="selection-result-title">

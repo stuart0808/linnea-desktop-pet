@@ -2,8 +2,6 @@ import React from "react";
 import { BarChart3, CalendarDays, FileText, ListTodo, MessageCircle, Send, Settings, Sparkles } from "lucide-react";
 import type { AppSettings, ConversationMessage, DesktopPetApi, PlanProposal, TodoCandidate, TodoItem } from "../../shared/types";
 import { createWorkspaceThemeStyle } from "../utils/themeHelpers";
-import { isSelectionPopoverBlockedTarget } from "../utils/domHelpers";
-import { getWorkspaceSelectedText } from "../utils/domHelpers";
 import { QuickStartPanel } from "../components/quickstart/QuickStartPanel";
 import type { WorkspaceTab } from "../components/quickstart/QuickStartPanel";
 import { ChatMessage } from "../components/chat/ChatMessage";
@@ -226,19 +224,6 @@ export function WorkspaceWindow() {
     });
   }
 
-  function updateSelectionPopover(mousePosition?: { x: number; y: number }) {
-    if (!api) return;
-    window.setTimeout(() => {
-      const capture = getWorkspaceSelectedText();
-      if (!capture) return;
-      const fallbackX = capture.rect ? capture.rect.left + capture.rect.width / 2 : window.innerWidth / 2;
-      const fallbackY = capture.rect ? capture.rect.bottom : window.innerHeight / 2;
-      const anchorX = mousePosition?.x ?? fallbackX;
-      const anchorY = mousePosition?.y ?? fallbackY;
-      void api.selection.openCapturePopover(capture.text, anchorX, anchorY).catch(() => undefined);
-    }, 0);
-  }
-
   async function updateSettings(patch: Partial<AppSettings>) {
     if (!api) return;
     const next = await api.settings.set(patch);
@@ -281,14 +266,6 @@ export function WorkspaceWindow() {
     <main
       className="workspace-shell"
       style={themeStyle}
-      onMouseUpCapture={(event) => {
-        if (isSelectionPopoverBlockedTarget(event.target)) return;
-        updateSelectionPopover({ x: event.clientX, y: event.clientY });
-      }}
-      onKeyUpCapture={(event) => {
-        if (isSelectionPopoverBlockedTarget(event.target)) return;
-        updateSelectionPopover();
-      }}
     >
       {toast && <div className="workspace-toast">{toast}</div>}
       <aside className="workspace-sidebar">

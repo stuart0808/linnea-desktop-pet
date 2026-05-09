@@ -117,7 +117,8 @@ const BOOL_SETTINGS = new Set<keyof AppSettings>([
 
 const STRING_SETTINGS = new Set<keyof AppSettings>([
   "aiModel", "aiBaseUrl", "aiProviderName",
-  "quickAiRecordShortcut", "workspaceThemeColor", "codexExecutable", "openAiModel"
+  "quickAiRecordShortcut",
+  "workspaceThemeColor", "codexExecutable", "openAiModel"
 ]);
 
 const OPTIONAL_STRING_SETTINGS = new Set<keyof AppSettings>([

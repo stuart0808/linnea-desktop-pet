@@ -1,7 +1,7 @@
 {
   "name": "linnea-desktop-pet",
   "productName": "Linnea",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "private": true,
   "description": "Windows desktop pet with chat, automatic todo capture, and reminders.",
   "main": "dist-electron/electron/main/main.js",

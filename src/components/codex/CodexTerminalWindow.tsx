@@ -2,7 +2,6 @@ import React from "react";
 import { FileText, FolderOpen, ListTodo, Save, Send, Sparkles, Square } from "lucide-react";
 import type { CodexApprovalPolicy, CodexModelSummary, CodexSandboxPolicy, CodexSessionInfo, CodexThreadSummary, CodexUiActivity, CodexUiMessage, DesktopPetApi } from "../../../shared/types";
 import { applyCodexThreadEventToSession, applyCodexUiEvent, getCodexActiveThreadSettings, getCodexEventThreadId, getCodexInputSuggestions, getNextCodexInputHistory, handleLocalCodexCommand, rememberCodexInput, resolveCodexDisplayPath } from "../../utils/codexHelpers";
-import { getWorkspaceSelectedText, isSelectionPopoverBlockedTarget } from "../../utils/domHelpers";
 import { MarkdownText } from "./MarkdownText";
 import { CodexRequestCard } from "./CodexRequestCard";
 import { ActivityItemContent, CodexResumePicker, CodexSuggestionPicker, CodexThinkingMessage, CodexThreadBadges } from "./CodexUIComponents";
@@ -319,27 +318,6 @@ export function CodexTerminalWindow({
     <main
       className="codex-window"
       style={themeStyle}
-      onMouseUpCapture={(event) => {
-        if (isSelectionPopoverBlockedTarget(event.target)) return;
-        window.setTimeout(() => {
-          const capture = getWorkspaceSelectedText();
-          if (!capture) return;
-          void api?.selection.openCapturePopover(capture.text, event.clientX, event.clientY).catch(() => undefined);
-        }, 0);
-      }}
-      onKeyUpCapture={(event) => {
-        if (isSelectionPopoverBlockedTarget(event.target)) return;
-        window.setTimeout(() => {
-          const capture = getWorkspaceSelectedText();
-          if (!capture) return;
-          const rect = capture.rect;
-          void api?.selection.openCapturePopover(
-            capture.text,
-            rect ? rect.left + rect.width / 2 : window.innerWidth / 2,
-            rect ? rect.bottom : window.innerHeight / 2
-          ).catch(() => undefined);
-        }, 0);
-      }}
     >
       <header className="codex-window-header">
         <div>

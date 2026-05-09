@@ -311,7 +311,6 @@ export interface DesktopPetApi {
     getResult(id: string): Promise<SelectionTextResult | null>;
     getCapture(id: string): Promise<SelectionCapture | null>;
     resolveCapture(id: string): Promise<SelectionCapture>;
-    openCapturePopover(text: string, clientX: number, clientY: number): Promise<void>;
     resizePopover(expanded: boolean): Promise<void>;
     createTodoFromCapture(id: string): Promise<void>;
     addAskCapture(id: string): Promise<SelectionAskDraft>;

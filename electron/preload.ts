@@ -40,7 +40,6 @@ const api: DesktopPetApi = {
     getResult: (id) => ipcRenderer.invoke("selection:getResult", id),
     getCapture: (id) => ipcRenderer.invoke("selection:getCapture", id),
     resolveCapture: (id) => ipcRenderer.invoke("selection:resolveCapture", id),
-    openCapturePopover: (text, clientX, clientY) => ipcRenderer.invoke("selection:openCapturePopover", text, clientX, clientY),
     resizePopover: (expanded) => ipcRenderer.invoke("selection:resizePopover", expanded),
     createTodoFromCapture: (id) => ipcRenderer.invoke("selection:createTodoFromCapture", id),
     addAskCapture: (id) => ipcRenderer.invoke("selection:addAskCapture", id),

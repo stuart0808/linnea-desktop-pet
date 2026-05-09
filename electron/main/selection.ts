@@ -22,19 +22,10 @@ export function setCreateCodexSession(fn: typeof _createCodexSession): void {
   _createCodexSession = fn;
 }
 
-// PowerShell UIA helper — reads selected text from the active application without
-// simulating any keyboard events. Uses UIAutomation TextPattern with ancestor
-// tree-walking, then falls back to WM_COPY (a Win32 message, not a key event).
+// PowerShell UIA helper — reads selected text purely via UIAutomation TextPattern.
+// No clipboard access, no keyboard events, no window messages.
 const UIA_HELPER_SCRIPT = [
   "Add-Type -AssemblyName UIAutomationClient",
-  "Add-Type -TypeDefinition @'",
-  "using System;",
-  "using System.Runtime.InteropServices;",
-  "public class LinneaWinApi {",
-  "    [DllImport(\"user32.dll\")] public static extern IntPtr GetForegroundWindow();",
-  "    [DllImport(\"user32.dll\")] public static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);",
-  "}",
-  "'@",
   "$tp = [System.Windows.Automation.TextPattern]::Pattern",
   "$tw = [System.Windows.Automation.TreeWalker]::RawViewWalker",
   "Write-Host 'READY'",
@@ -44,13 +35,13 @@ const UIA_HELPER_SCRIPT = [
   "    if ($null -eq $line) { break }",
   "    if ($line.Trim() -eq 'GET') {",
   "        $result = 'EMPTY:'",
-  "        # Step 1: UIA TextPattern — walk up the automation tree from the focused element.",
-  "        # This covers browsers, modern editors, VS Code, Office, WPF apps, etc.",
+  "        # Walk up the automation tree from the focused element looking for TextPattern.",
+  "        # This covers browsers, editors, VS Code, Office, WPF and UWP apps.",
   "        try {",
   "            $el = [System.Windows.Automation.AutomationElement]::FocusedElement",
   "            $cur = $el",
   "            $depth = 0",
-  "            while ($null -ne $cur -and $depth -lt 6 -and $result -eq 'EMPTY:') {",
+  "            while ($null -ne $cur -and $depth -lt 4 -and $result -eq 'EMPTY:') {",
   "                try {",
   "                    $pat = $cur.GetCurrentPattern($tp)",
   "                    $ranges = $pat.GetSelection()",
@@ -68,32 +59,6 @@ const UIA_HELPER_SCRIPT = [
   "                $depth++",
   "            }",
   "        } catch { }",
-  "        # Step 2: WM_COPY fallback — sends the WM_COPY window message (0x0301) to the",
-  "        # foreground window. This is a standard Win32 API message, not a key event.",
-  "        # It works for legacy edit controls and terminal emulators that ignore UIA.",
-  "        if ($result -eq 'EMPTY:') {",
-  "            try {",
-  "                $hwnd = [LinneaWinApi]::GetForegroundWindow()",
-  "                if ($hwnd -ne [IntPtr]::Zero) {",
-  "                    $prev = ''",
-  "                    try { $prev = Get-Clipboard -ErrorAction Stop } catch { }",
-  "                    $marker = [System.Guid]::NewGuid().ToString()",
-  "                    try { Set-Clipboard -Value $marker -ErrorAction Stop } catch { }",
-  "                    [LinneaWinApi]::SendMessage($hwnd, 0x0301, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null",
-  "                    Start-Sleep -Milliseconds 80",
-  "                    $copied = ''",
-  "                    try { $copied = Get-Clipboard -ErrorAction Stop } catch { }",
-  "                    if ($copied -ne $marker -and $copied.Length -gt 0) {",
-  "                        $b64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($copied))",
-  "                        $result = \"TEXT:$b64\"",
-  "                    }",
-  "                    try {",
-  "                        if ($prev.Length -gt 0) { Set-Clipboard -Value $prev -ErrorAction Stop }",
-  "                        elseif ($result -eq 'EMPTY:') { Set-Clipboard -Value $marker -ErrorAction Stop }",
-  "                    } catch { }",
-  "                }",
-  "            } catch { }",
-  "        }",
   "        Write-Host $result",
   "        [Console]::Out.Flush()",
   "    }",
@@ -187,7 +152,7 @@ export function registerGlobalSelectionHook(): void {
     uIOhook.on("mousedown", (event: UiohookMouseEvent) => {
       const point = normalizeGlobalMousePoint(event.x, event.y);
       closePendingSelectionPopoverIfOutside(point.x, point.y);
-      state.globalMouseDown = { x: point.x, y: point.y, time: Date.now(), insideAppWindow: isPointInsideAppWindow(point.x, point.y), moved: false };
+      state.globalMouseDown = { x: point.x, y: point.y, time: Date.now(), moved: false };
     });
     uIOhook.on("mousemove", (event: UiohookMouseEvent) => {
       if (!state.globalMouseDown) return;
@@ -201,12 +166,17 @@ export function registerGlobalSelectionHook(): void {
       const start = state.globalMouseDown;
       state.globalMouseDown = null;
       if (!start) return;
-      if (start.insideAppWindow) return;
       const distance = Math.hypot(point.x - start.x, point.y - start.y);
       const duration = Date.now() - start.time;
       if (!start.moved || distance < 10 || duration < 120) return;
       void (async () => {
         const keySnapshot = state.lastGlobalKeyActivityTime;
+        // Wait before querying UIA. UIA GetSelection() is a synchronous cross-process
+        // COM call; while it runs, the target app's accessibility thread is busy and
+        // can delay processing keyboard events. This pause lets an immediately-following
+        // Ctrl+V reach the app before we ever start the COM call.
+        await new Promise<void>(r => setTimeout(r, 180));
+        if (state.lastGlobalKeyActivityTime !== keySnapshot) return;
         const text = await queryUiaSelectedText();
         if (!text || text.length < 2) return;
         if (state.lastGlobalKeyActivityTime !== keySnapshot) return;
@@ -216,9 +186,10 @@ export function registerGlobalSelectionHook(): void {
     uIOhook.on("click", (event: UiohookMouseEvent) => {
       if (event.clicks < 2) return;
       const point = normalizeGlobalMousePoint(event.x, event.y);
-      if (isPointInsideAppWindow(point.x, point.y)) return;
       void (async () => {
         const keySnapshot = state.lastGlobalKeyActivityTime;
+        await new Promise<void>(r => setTimeout(r, 180));
+        if (state.lastGlobalKeyActivityTime !== keySnapshot) return;
         const text = await queryUiaSelectedText();
         if (!text || text.length < 2) return;
         if (state.lastGlobalKeyActivityTime !== keySnapshot) return;
@@ -260,15 +231,12 @@ export async function syncGlobalSelectionHook(): Promise<void> {
   }
 }
 
-function isPointInsideAppWindow(x: number, y: number): boolean {
-  const windows = [state.mainWindow, state.workspaceWindow, state.selectionPopoverWindow, ...state.selectionResultWindows].filter(
-    (w): w is BrowserWindow => Boolean(w)
-  );
-  return windows.some((w) => isPointInsideBrowserWindow(w, x, y));
-}
-
 function isPointInsideBrowserWindow(window: BrowserWindow, x: number, y: number): boolean {
   if (window.isDestroyed() || !window.isVisible()) return false;
+  // The main window is transparent and toggles setIgnoreMouseEvents so clicks pass
+  // through to the app below. When it's click-through, treat its area as outside
+  // our app so selection still works in the underlying window.
+  if (window === state.mainWindow && state.mainWindowIgnoringMouseEvents) return false;
   const bounds = window.getBounds();
   return x >= bounds.x && x <= bounds.x + bounds.width && y >= bounds.y && y <= bounds.y + bounds.height;
 }
@@ -321,8 +289,6 @@ async function openPendingGlobalSelectionCapture(x: number, y: number, prefilled
 }
 
 // The capture always contains the text obtained via UIA at the time the popover was opened.
-// This function is kept for API compatibility — callers (e.g. openCapturePopover IPC) may
-// also pass captures that were pre-filled from the renderer side.
 export async function resolveSelectionCapture(id: string): Promise<SelectionCapture> {
   const capture = state.selectionCaptures.get(id);
   if (!capture) throw new Error("Selected text capture not found");
