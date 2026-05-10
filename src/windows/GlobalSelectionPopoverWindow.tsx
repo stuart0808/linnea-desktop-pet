@@ -17,12 +17,12 @@ export function GlobalSelectionPopoverWindow({
 }) {
   const [capture, setCapture] = React.useState<SelectionCapture | null>(null);
   const [busyAction, setBusyAction] = React.useState<SelectionAction | null>(null);
-  const [askDraft, setAskDraft] = React.useState<SelectionAskDraft>({ count: 0, text: "" });
+  const [askDraft, setAskDraft] = React.useState<SelectionAskDraft>({ count: 0, text: "", items: [] });
   const [error, setError] = React.useState("");
 
   React.useEffect(() => {
     if (!api) {
-      setError("API 未连接");
+      setError("Linnea 桌面服务暂未连接");
       return;
     }
     if (!captureId) {

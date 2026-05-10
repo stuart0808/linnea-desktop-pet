@@ -90,7 +90,7 @@ export function SelectionResultWindow({
 
   React.useEffect(() => {
     if (!api) {
-      setError("Electron API 未连接。");
+      setError("Linnea 桌面服务暂未连接。");
       return;
     }
     if (!resultId) {

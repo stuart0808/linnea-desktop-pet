@@ -17,7 +17,7 @@ const quickStartTours: Array<{ tab: WorkspaceTab; title: string; detail: string;
   { tab: "calendar", title: "拖入日历", detail: "把任务池里的任务安排到日/周/月视图，区分截止时间和实际计划时间。", action: "打开日历" },
   { tab: "summary", title: "复盘风险", detail: "总结页会聚合今日计划、未来重点和风险任务，适合每天收尾时检查。", action: "查看总结" },
   { tab: "codex", title: "交给 Codex", detail: "拖拽文件到桌宠或在 Codex 页选择文件夹，创建隔离副本后再开始代码任务。", action: "打开 Codex" },
-  { tab: "settings", title: "调整偏好", detail: "设置 AI 服务、快捷键、系统通知、主题色和桌宠形象。", action: "打开设置" }
+  { tab: "settings", title: "调整偏好", detail: "设置模型服务、快捷键、系统通知、主题色和桌宠形象。", action: "打开设置" }
 ];
 
 export function QuickStartPanel({

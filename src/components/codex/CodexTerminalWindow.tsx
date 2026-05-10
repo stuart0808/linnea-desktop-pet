@@ -1,10 +1,10 @@
 import React from "react";
 import { FileText, FolderOpen, ListTodo, Save, Send, Sparkles, Square } from "lucide-react";
-import type { CodexApprovalPolicy, CodexModelSummary, CodexSandboxPolicy, CodexSessionInfo, CodexThreadSummary, CodexUiActivity, CodexUiMessage, DesktopPetApi } from "../../../shared/types";
-import { applyCodexThreadEventToSession, applyCodexUiEvent, getCodexActiveThreadSettings, getCodexEventThreadId, getCodexInputSuggestions, getNextCodexInputHistory, handleLocalCodexCommand, rememberCodexInput, resolveCodexDisplayPath } from "../../utils/codexHelpers";
+import type { CodexApprovalPolicy, CodexModelSummary, CodexPendingRequest, CodexSandboxPolicy, CodexSessionInfo, CodexThreadSummary, CodexUiActivity, CodexUiMessage, DesktopPetApi, SelectionReference } from "../../../shared/types";
+import { applyCodexThreadEventToSession, applyCodexUiEvent, getCodexActiveThreadSettings, getCodexApprovalLabel, getCodexEventThreadId, getCodexInputSuggestions, getCodexSandboxLabel, getNextCodexInputHistory, handleLocalCodexCommand, rememberCodexInput, resolveCodexDisplayPath } from "../../utils/codexHelpers";
 import { MarkdownText } from "./MarkdownText";
-import { CodexRequestCard } from "./CodexRequestCard";
-import { ActivityItemContent, CodexResumePicker, CodexSuggestionPicker, CodexThinkingMessage, CodexThreadBadges } from "./CodexUIComponents";
+import { CodexRequestCard, getCodexRequestActions, isCommandExecutionApprovalRequest } from "./CodexRequestCard";
+import { CodexActivityDrawer, CodexResumePicker, CodexSuggestionPicker, CodexThinkingMessage, CodexThreadBadges } from "./CodexUIComponents";
 
 export function CodexTerminalWindow({
   api,
@@ -35,7 +35,13 @@ export function CodexTerminalWindow({
   const [inputHistoryIndex, setInputHistoryIndex] = React.useState<number | null>(null);
   const [messages, setMessages] = React.useState<CodexUiMessage[]>([]);
   const [activity, setActivity] = React.useState<CodexUiActivity[]>([]);
-  const [requests, setRequests] = React.useState<Array<{ id: number | string; method: string; params: any }>>([]);
+  const [requests, setRequests] = React.useState<CodexPendingRequest[]>([]);
+  const [requestActionIndex, setRequestActionIndex] = React.useState<Record<string, number>>({});
+  const [requestErrors, setRequestErrors] = React.useState<Record<string, string>>({});
+  const [resolvingRequestId, setResolvingRequestId] = React.useState<number | string | null>(null);
+  const [requestsExpanded, setRequestsExpanded] = React.useState(false);
+  const [selectionReferences, setSelectionReferences] = React.useState<SelectionReference[]>([]);
+  const [selectionReferencesExpanded, setSelectionReferencesExpanded] = React.useState(false);
   const [rawEvents, setRawEvents] = React.useState<string[]>([]);
   const [responding, setResponding] = React.useState(false);
   const [models, setModels] = React.useState<CodexModelSummary[]>([]);
@@ -45,6 +51,13 @@ export function CodexTerminalWindow({
   const [suggestionIndex, setSuggestionIndex] = React.useState(0);
   const suggestions = getCodexInputSuggestions(input, session, models);
   const activeSettings = getCodexActiveThreadSettings(session);
+  const primaryRequest = requests[0];
+  const visibleRequests = requestsExpanded ? requests : requests.slice(0, 1);
+  const activeCommandRequest = isCommandExecutionApprovalRequest(primaryRequest) ? primaryRequest : undefined;
+
+  function getRequestKey(requestId: number | string): string {
+    return String(requestId);
+  }
 
   React.useEffect(() => {
     setSuggestionIndex(0);
@@ -63,6 +76,8 @@ export function CodexTerminalWindow({
         activeThreadIdRef.current = info.activeThreadId;
         setMessages(info.history?.messages ?? []);
         setActivity(info.history?.activity ?? []);
+        setRequests(info.pendingRequests ?? []);
+        setSelectionReferences(info.selectionReferences ?? []);
       }
     }).catch((error) => {
       if (!disposed) {
@@ -87,7 +102,19 @@ export function CodexTerminalWindow({
     if (!api || startedRef.current) return;
     startedRef.current = true;
     void api.codex.startSession(sessionId, { initialPrompt, sandbox, approval })
-      .then(() => {
+      .then(async () => {
+        const latest = await api.codex.getSession(sessionId).catch(() => null);
+        if (latest) {
+          setSession(latest);
+          activeThreadIdRef.current = latest.activeThreadId;
+          setRequests(latest.pendingRequests ?? []);
+          setSelectionReferences(latest.selectionReferences ?? []);
+          if (latest.resumeStatus?.status === "resumeFailed") {
+            setStatus("error");
+            setStatusText("线程恢复失败，请新建线程后继续。");
+            return;
+          }
+        }
         setStatus("running");
         setStatusText("Codex 已连接");
         void api.codex.listModels(sessionId).then(setModels).catch(() => undefined);
@@ -108,7 +135,7 @@ export function CodexTerminalWindow({
         setSession((current) => current ? applyCodexThreadEventToSession(current, event.payload, eventThreadId) : current);
       }
       const activeThreadId = activeThreadIdRef.current;
-      if (eventThreadId && activeThreadId && eventThreadId !== activeThreadId) return;
+      if (event.kind !== "request" && eventThreadId && activeThreadId && eventThreadId !== activeThreadId) return;
       applyCodexUiEvent(event.kind, event.payload, {
         setMessages,
         setActivity,
@@ -125,6 +152,14 @@ export function CodexTerminalWindow({
   React.useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
   }, [messages.length, activity.length, requests.length, responding]);
+
+  React.useEffect(() => {
+    const validKeys = new Set(requests.map((request) => getRequestKey(request.id)));
+    setRequestActionIndex((current) => Object.fromEntries(Object.entries(current).filter(([key]) => validKeys.has(key))));
+    setRequestErrors((current) => Object.fromEntries(Object.entries(current).filter(([key]) => validKeys.has(key))));
+    if (resolvingRequestId !== null && !validKeys.has(getRequestKey(resolvingRequestId))) setResolvingRequestId(null);
+    if (requests.length <= 1 && requestsExpanded) setRequestsExpanded(false);
+  }, [requests, requestsExpanded, resolvingRequestId]);
 
   async function saveSession() {
     if (!api || saving || !session) return;
@@ -149,7 +184,7 @@ export function CodexTerminalWindow({
 
   const handleOpenPath = React.useCallback((path: string) => {
     if (!api?.app.openPath) {
-      setStatusText("当前窗口没有可用的打开路径 API，请重启应用。");
+      setStatusText("Linnea 暂时无法打开该路径，请重启应用。");
       return;
     }
     const targetPath = resolveCodexDisplayPath(path, session?.workspacePath);
@@ -162,12 +197,16 @@ export function CodexTerminalWindow({
 
   async function newThread() {
     if (!api || !session) return;
+    if (hasCurrentThreadPendingRequests()) {
+      setStatusText("当前线程还有待审批请求，请先允许或拒绝后再新建线程。");
+      return;
+    }
     if (messages.length === 0 && activity.length === 0) {
-      setStatusText("当前 Thread 还是空的");
+      setStatusText("当前线程还是空的");
       return;
     }
     setStatus("starting");
-    setStatusText("正在新建 Thread...");
+    setStatusText("正在新建线程...");
     try {
       await api.codex.updateSessionHistory(session.id, { messages, activity });
       const next = await api.codex.newThread(session.id);
@@ -175,13 +214,19 @@ export function CodexTerminalWindow({
       setSession(next);
       setMessages([]);
       setActivity([]);
-      setRequests([]);
+      setRequests(next.pendingRequests ?? requests);
+      setRequestActionIndex({});
+      setRequestErrors({});
+      setResolvingRequestId(null);
+      setRequestsExpanded(false);
       setRawEvents([]);
+      setSelectionReferences(next.selectionReferences ?? []);
+      setSelectionReferencesExpanded(false);
       setStatus("running");
-      setStatusText("新 Thread 已创建");
+      setStatusText("新线程已创建");
     } catch (error) {
       setStatus("error");
-      setStatusText(error instanceof Error ? error.message : "新建 Thread 失败。");
+      setStatusText(error instanceof Error ? error.message : "新建线程失败。");
     }
   }
 
@@ -205,29 +250,67 @@ export function CodexTerminalWindow({
 
   async function resumeThread(threadId: string) {
     if (!api || !session) return;
+    if (hasCurrentThreadPendingRequests()) {
+      setStatusText("当前线程还有待审批请求，请先允许或拒绝后再切换。");
+      return;
+    }
     setResumeBusy(true);
     setStatus("starting");
-    setStatusText("正在切换 Thread...");
+    setStatusText("正在切换线程...");
     try {
       const next = await api.codex.resumeThread(session.id, threadId);
       activeThreadIdRef.current = next.activeThreadId;
       setSession(next);
       setMessages(next.history?.messages ?? []);
       setActivity(next.history?.activity ?? []);
-      setRequests([]);
+      setRequests(next.pendingRequests ?? requests);
+      setRequestActionIndex({});
+      setRequestErrors({});
+      setResolvingRequestId(null);
+      setRequestsExpanded(false);
       setRawEvents([]);
+      setSelectionReferences(next.selectionReferences ?? []);
+      setSelectionReferencesExpanded(false);
       setResumeThreads([]);
       setStatus("running");
-      setStatusText("Thread 已切换");
+      setStatusText("线程已切换");
     } catch (error) {
       setStatus("error");
-      setStatusText(error instanceof Error ? error.message : "切换 Thread 失败。");
+      setStatusText(error instanceof Error ? error.message : "切换线程失败。");
     } finally {
       setResumeBusy(false);
     }
   }
 
   function handleComposerKeyDown(event: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) {
+    if (activeCommandRequest) {
+      const key = getRequestKey(activeCommandRequest.id);
+      const actions = getCodexRequestActions(activeCommandRequest);
+      const currentIndex = Math.min(requestActionIndex[key] ?? 0, Math.max(actions.length - 1, 0));
+      const isResolvingActiveRequest = resolvingRequestId === activeCommandRequest.id;
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        if (isResolvingActiveRequest) return;
+        const delta = event.key === "ArrowDown" ? 1 : -1;
+        const nextIndex = Math.min(actions.length - 1, Math.max(0, currentIndex + delta));
+        setRequestActionIndex((current) => ({ ...current, [key]: nextIndex }));
+        return;
+      }
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        if (isResolvingActiveRequest) return;
+        const action = actions[currentIndex] ?? actions[0];
+        if (action) void resolveRequest(activeCommandRequest.id, action.response);
+        return;
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        if (isResolvingActiveRequest) return;
+        const action = actions.find((item) => item.key === "decline") ?? actions.find((item) => item.key === "cancel") ?? actions[actions.length - 1];
+        if (action) void resolveRequest(activeCommandRequest.id, action.response);
+        return;
+      }
+    }
     if (resumeThreads.length) {
       if (event.key === "ArrowDown") {
         event.preventDefault();
@@ -300,8 +383,15 @@ export function CodexTerminalWindow({
         setStatusText
       });
       if (handledCommand) return;
+      if (session?.resumeStatus?.status === "resumeFailed") {
+        setStatus("error");
+        setStatusText("线程恢复失败，请新建线程后继续。");
+        return;
+      }
       setResponding(true);
       await api.codex.sendInput(sessionId, text);
+      setSelectionReferences([]);
+      setSelectionReferencesExpanded(false);
     } catch (error) {
       setStatus("error");
       setStatusText(error instanceof Error ? error.message : "发送失败。");
@@ -310,9 +400,32 @@ export function CodexTerminalWindow({
 
   async function resolveRequest(requestId: number | string, response: unknown) {
     if (!api) return;
-    await api.codex.respondRequest(sessionId, requestId, response);
-    setRequests((current) => current.filter((request) => request.id !== requestId));
+    const key = getRequestKey(requestId);
+    setResolvingRequestId(requestId);
+    setRequestErrors((current) => {
+      const next = { ...current };
+      delete next[key];
+      return next;
+    });
+    try {
+      await api.codex.respondRequest(sessionId, requestId, response);
+      setRequests((current) => current.filter((request) => request.id !== requestId));
+    } catch (error) {
+      setRequestErrors((current) => ({
+        ...current,
+        [key]: error instanceof Error ? error.message : "提交审批失败。"
+      }));
+    } finally {
+      setResolvingRequestId((current) => current === requestId ? null : current);
+    }
   }
+
+  function hasCurrentThreadPendingRequests(): boolean {
+    const activeThreadId = activeThreadIdRef.current ?? session?.activeThreadId;
+    return requests.some((request) => !request.threadId || request.threadId === activeThreadId);
+  }
+
+  const visibleSelectionReferences = selectionReferencesExpanded ? selectionReferences : selectionReferences.slice(0, 1);
 
   return (
     <main
@@ -325,6 +438,15 @@ export function CodexTerminalWindow({
           <span>{session?.workspacePath ?? "加载工作目录..."}</span>
         </div>
         <div className={`codex-status ${status}`}>{statusText}</div>
+        {session && (
+          <CodexActivityDrawer
+            activity={activity}
+            rawEvents={rawEvents}
+            workspacePath={session.workspacePath}
+            onOpenPath={handleOpenPath}
+            onClearRawEvents={() => setRawEvents([])}
+          />
+        )}
         <CodexThreadBadges settings={activeSettings} models={models} />
       </header>
       <section className="codex-window-body">
@@ -339,8 +461,8 @@ export function CodexTerminalWindow({
             )) ?? <span>加载中...</span>}
           </div>
           <div className="codex-session-meta">
-            <span>Sandbox: {sandbox}</span>
-            <span>Approval: {approval}</span>
+            <span>权限范围：{getCodexSandboxLabel(sandbox)}</span>
+            <span>执行前确认：{getCodexApprovalLabel(approval)}</span>
             {session?.savedPath && <span>已保存: {session.savedPath}</span>}
           </div>
           <button type="button" onClick={() => session && void api?.codex.openWorkspace(session.id)} disabled={!session}>
@@ -353,7 +475,7 @@ export function CodexTerminalWindow({
             <ListTodo size={14} /> 线程
           </button>
           <button type="button" onClick={() => void newThread()} disabled={!session || status === "starting"}>
-            <Sparkles size={14} /> 新建 Thread
+            <Sparkles size={14} /> 新建线程
           </button>
           <button type="button" onClick={() => void stopSession()} disabled={!session || status !== "running"}>
             <Square size={14} /> 停止
@@ -368,31 +490,61 @@ export function CodexTerminalWindow({
                 <MarkdownText text={message.text} onOpenPath={handleOpenPath} />
               </div>
             ))}
-            {requests.map((request) => (
-              <CodexRequestCard key={request.id} request={request} onResolve={(response) => void resolveRequest(request.id, response)} />
-            ))}
-            {responding && <CodexThinkingMessage />}
-            <details className="codex-activity-log">
-              <summary>活动详情 {activity.length ? `(${activity.length})` : ""}</summary>
-              <div>
-                {activity.length === 0 ? <span>暂无命令或文件活动。</span> : activity.map((item) => (
-                  <div key={item.id} className={`codex-activity ${item.type}`}>
-                    <div className="codex-activity-header">
-                      <strong>{item.title}</strong>
-                      {item.status && <span className={`codex-activity-status ${item.status}`}>{item.status}</span>}
-                    </div>
-                    {session && <ActivityItemContent item={item} workspacePath={session.workspacePath} onOpenPath={handleOpenPath} />}
+            {requests.length > 0 && (
+              <section className={`codex-request-stack ${requestsExpanded ? "expanded" : "collapsed"} ${requests.length > 1 ? "multi" : ""}`} aria-label="待审批请求">
+                <div className="codex-request-stack-header">
+                  <div>
+                    <strong>待审批请求</strong>
+                    <span>{requests.length === 1 ? "1 个请求等待处理" : `${requests.length} 个请求等待处理`}</span>
                   </div>
-                ))}
-              </div>
-            </details>
-            <details className="codex-raw-log">
-              <summary>调试事件</summary>
-              <pre>{rawEvents.slice(-40).join("\n\n")}</pre>
-            </details>
+                  {requests.length > 1 && (
+                    <button type="button" onClick={() => setRequestsExpanded((current) => !current)}>
+                      {requestsExpanded ? "收起" : "展开全部"}
+                    </button>
+                  )}
+                </div>
+                <div className="codex-request-stack-list">
+                  {visibleRequests.map((request) => (
+                    <CodexRequestCard
+                      key={request.id}
+                      request={request}
+                      activeIndex={requestActionIndex[getRequestKey(request.id)] ?? 0}
+                      resolving={resolvingRequestId === request.id}
+                      error={requestErrors[getRequestKey(request.id)]}
+                      onActiveIndexChange={(index) => setRequestActionIndex((current) => ({ ...current, [getRequestKey(request.id)]: index }))}
+                      onResolve={(response) => void resolveRequest(request.id, response)}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+            {responding && <CodexThinkingMessage />}
             <div ref={messagesEndRef} aria-hidden="true" />
           </div>
           <form className="codex-composer" onSubmit={sendMessage}>
+            {selectionReferences.length > 0 && (
+              <section className={`codex-selection-reference-stack ${selectionReferencesExpanded ? "expanded" : "collapsed"} ${selectionReferences.length > 1 ? "multi" : ""}`} aria-label="划词引用内容">
+                <div className="codex-selection-reference-header">
+                  <div>
+                    <strong>引用内容</strong>
+                    <span>{selectionReferences.length === 1 ? "1 条划词引用将随问题发送" : `${selectionReferences.length} 条划词引用将随问题发送`}</span>
+                  </div>
+                  {selectionReferences.length > 1 && (
+                    <button type="button" onClick={() => setSelectionReferencesExpanded((current) => !current)}>
+                      {selectionReferencesExpanded ? "收起" : "展开全部"}
+                    </button>
+                  )}
+                </div>
+                <div className="codex-selection-reference-list">
+                  {visibleSelectionReferences.map((reference, index) => (
+                    <article key={reference.id} className="codex-selection-reference-item">
+                      <strong>引用 {index + 1}</strong>
+                      <p>{reference.text}</p>
+                    </article>
+                  ))}
+                </div>
+              </section>
+            )}
             {resumeThreads.length > 0 && (
               <CodexResumePicker
                 threads={resumeThreads}
@@ -418,8 +570,8 @@ export function CodexTerminalWindow({
               <textarea value={input} rows={Math.min(10, Math.max(2, input.split(/\r?\n/).length))} onKeyDown={handleComposerKeyDown} onChange={(event) => {
                 setInput(event.target.value);
                 setInputHistoryIndex(null);
-              }} placeholder="输入指令，支持 /model、/review、/compact、@文件名..." />
-              <button type="submit" disabled={!input.trim() || status === "error"}>
+              }} placeholder={selectionReferences.length ? "输入你想基于引用提出的问题..." : "输入指令，支持 /model、/review、/compact、@文件名..."} />
+              <button type="submit" disabled={!input.trim() || status === "error" || session?.resumeStatus?.status === "resumeFailed"}>
                 <Send size={16} />
               </button>
             </div>

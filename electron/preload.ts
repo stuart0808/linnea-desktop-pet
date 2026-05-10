@@ -69,6 +69,7 @@ const api: DesktopPetApi = {
     stopSession: (sessionId) => ipcRenderer.invoke("codex:stopSession", sessionId),
     saveSession: (sessionId) => ipcRenderer.invoke("codex:saveSession", sessionId),
     discardSession: (sessionId) => ipcRenderer.invoke("codex:discardSession", sessionId),
+    clearCache: () => ipcRenderer.invoke("codex:clearCache"),
     openWorkspace: (sessionId) => ipcRenderer.invoke("codex:openWorkspace", sessionId)
   },
   app: {

@@ -1,6 +1,7 @@
 import React from "react";
 import { FileText, Sparkles, X } from "lucide-react";
 import type { CodexApprovalPolicy, CodexDropItem, CodexSandboxPolicy } from "../../../shared/types";
+import { getCodexApprovalLabel, getCodexSandboxLabel } from "../../utils/codexHelpers";
 
 export function CodexBasketPopover({
   items,
@@ -56,18 +57,18 @@ export function CodexBasketPopover({
       </div>
       <div className="codex-policy-grid">
         <label>
-          Sandbox
+          权限范围
           <select value={sandbox} onChange={(event) => onSandboxChange(event.target.value as CodexSandboxPolicy)}>
-            <option value="read-only">只读分析</option>
-            <option value="workspace-write">允许修改副本</option>
-            <option value="danger-full-access">完全权限</option>
+            <option value="read-only">{getCodexSandboxLabel("read-only")}</option>
+            <option value="workspace-write">{getCodexSandboxLabel("workspace-write")}</option>
+            <option value="danger-full-access">{getCodexSandboxLabel("danger-full-access")}</option>
           </select>
         </label>
         <label>
-          Approval
+          执行前确认
           <select value={approval} onChange={(event) => onApprovalChange(event.target.value as CodexApprovalPolicy)}>
-            <option value="on-request">需要时询问</option>
-            <option value="never">不询问</option>
+            <option value="on-request">{getCodexApprovalLabel("on-request")}</option>
+            <option value="never">{getCodexApprovalLabel("never")}</option>
           </select>
         </label>
       </div>

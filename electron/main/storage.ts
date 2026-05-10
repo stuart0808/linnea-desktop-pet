@@ -257,7 +257,7 @@ export class JsonStore {
 
   private async saveEncryptedApiKey(key: string): Promise<void> {
     if (!safeStorage.isEncryptionAvailable()) {
-      throw new Error("当前系统环境不支持安全保存 API Key。请改用环境变量，或在本次会话中临时测试。");
+      throw new Error("当前系统环境不支持安全保存访问密钥。请改用环境变量，或在本次会话中临时测试。");
     }
     const encrypted = safeStorage.encryptString(key);
     const tmpPath = `${this.keyFilePath}.tmp`;

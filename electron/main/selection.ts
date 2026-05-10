@@ -5,14 +5,14 @@ import { writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { uIOhook, type UiohookKeyboardEvent, type UiohookMouseEvent } from "uiohook-napi";
-import type { CodexApprovalPolicy, CodexCreateSessionOptions, CodexDropItem, CodexSandboxPolicy, SelectionAskDraft, SelectionCapture } from "../../shared/types.js";
+import type { CodexApprovalPolicy, CodexCreateSessionOptions, CodexDropItem, CodexSandboxPolicy, SelectionAskDraft, SelectionCapture, SelectionReference } from "../../shared/types.js";
 import { state } from "./state.js";
 import { JsonStore } from "./storage.js";
 
 const store = new JsonStore();
 
 let _openSelectionPopoverWindow: (capture: SelectionCapture, x: number, y: number) => Promise<void> = async () => {};
-let _createCodexSession: (items: CodexDropItem[], options: CodexCreateSessionOptions, openWindow: boolean, allowEmpty: boolean, draftPrompt: string) => Promise<unknown> = async () => ({});
+let _createCodexSession: (items: CodexDropItem[], options: CodexCreateSessionOptions, openWindow: boolean, allowEmpty: boolean, draftPrompt: string, selectionReferences?: SelectionReference[]) => Promise<unknown> = async () => ({});
 
 export function setOpenSelectionPopoverWindow(fn: typeof _openSelectionPopoverWindow): void {
   _openSelectionPopoverWindow = fn;
@@ -298,17 +298,16 @@ export async function resolveSelectionCapture(id: string): Promise<SelectionCapt
 }
 
 export function getSelectionAskDraft(): SelectionAskDraft {
+  const items = state.selectionAskDraftCaptures.map((capture) => ({
+    id: capture.id,
+    text: capture.text,
+    createdAt: capture.createdAt
+  }));
   return {
-    count: state.selectionAskDraftCaptures.length,
-    text: state.selectionAskDraftCaptures.map((c) => c.text).join("\n\n")
+    count: items.length,
+    text: items.map((item) => item.text).join("\n\n"),
+    items
   };
-}
-
-function buildSelectionAskPrompt(captures: SelectionCapture[]): string {
-  const references = captures
-    .map((c, i) => `[引用 ${i + 1}]\n${c.text.trim()}`)
-    .join("\n\n");
-  return `我想基于以下引用内容提问：\n\n${references}\n\n我的问题是：`;
 }
 
 export async function submitSelectionAskDraft(): Promise<void> {
@@ -321,5 +320,10 @@ export async function submitSelectionAskDraft(): Promise<void> {
     ? settings.codexDefaultSandbox
     : "workspace-write";
   const approval: CodexApprovalPolicy = settings.codexDefaultApproval === "never" ? "never" : "on-request";
-  await _createCodexSession([], { initialPrompt: "", sandbox, approval }, true, true, buildSelectionAskPrompt(captures));
+  const references = captures.map((capture) => ({
+    id: capture.id,
+    text: capture.text,
+    createdAt: capture.createdAt
+  }));
+  await _createCodexSession([], { initialPrompt: "", sandbox, approval }, true, true, "", references);
 }

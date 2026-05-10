@@ -9,7 +9,7 @@ interface AiClientConfig {
 }
 
 const fallbackResult = (text: string): ModelStructuredResult => ({
-  replyText: "我先整理成任务草案，确认后再保存。当前没有配置模型 API Key，所以只使用本地规则做基础抽取。",
+  replyText: "我先整理成任务草案，确认后再保存。当前没有配置模型服务访问密钥，所以只使用本地规则做基础抽取。",
   mood: "thinking",
   taskIntent: "simple_todo",
   todoCandidates: localTodoExtract(text)
@@ -87,8 +87,8 @@ export async function summarizeRecentContext(params: {
     .slice(-12);
   if (!params.apiKey) {
     return todayTodos.length
-      ? `当前没有配置模型 API Key。根据本地数据，今天需要处理：${todayTodos.slice(0, 6).map((todo) => todo.title).join("；")}。建议先处理已过期或有明确提醒时间的事项，再整理剩余任务。`
-      : "当前没有配置模型 API Key。根据本地数据，今天没有明确待完成事项。建议检查是否有遗漏任务，并保留一段时间处理临时事项。";
+      ? `当前没有配置模型服务访问密钥。根据本地数据，今天需要处理：${todayTodos.slice(0, 6).map((todo) => todo.title).join("；")}。建议先处理已过期或有明确提醒时间的事项，再整理剩余任务。`
+      : "当前没有配置模型服务访问密钥。根据本地数据，今天没有明确待完成事项。建议检查是否有遗漏任务，并保留一段时间处理临时事项。";
   }
 
   const client = createAiClient(params);
@@ -126,7 +126,7 @@ export async function testAiConnection(params: {
   providerName?: string;
 }): Promise<string> {
   if (!params.apiKey?.trim()) {
-    throw new Error(`请先填写 ${params.providerName ?? "模型服务"} API Key，或配置对应环境变量。`);
+    throw new Error(`请先填写 ${params.providerName ?? "模型服务"} 访问密钥，或配置对应环境变量。`);
   }
 
   const client = createAiClient(params);
@@ -159,8 +159,8 @@ export async function processSelectedText(params: {
   if (!trimmed) return "";
   if (!params.apiKey) {
     return params.action === "translate"
-      ? `当前没有配置模型 API Key。\n\n${trimmed}`
-      : `当前没有配置模型 API Key。\n\n- 已选中文字共 ${trimmed.length} 个字符。\n- 请配置 API Key 后使用智能总结。`;
+      ? `当前没有配置模型服务访问密钥。\n\n${trimmed}`
+      : `当前没有配置模型服务访问密钥。\n\n- 已选中文字共 ${trimmed.length} 个字符。\n- 请配置访问密钥后使用智能总结。`;
   }
 
   const client = createAiClient(params);
@@ -212,7 +212,7 @@ function localTodoExtract(text: string) {
   return [
     {
       title: normalized.replace(/^(提醒我|记一下|待办[:：]?)/, "").trim() || normalized,
-      notes: "由本地规则自动记录。配置 DeepSeek API Key 后会启用更准确的抽取。",
+      notes: "由本地规则自动记录。配置 DeepSeek 访问密钥后会启用更准确的抽取。",
       project: undefined,
       tags: [],
       priority: "medium" as const,

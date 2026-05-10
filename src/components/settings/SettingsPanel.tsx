@@ -2,6 +2,7 @@ import React from "react";
 import { Bell, FolderOpen, Image as ImageIcon, KeyRound, RotateCcw, Settings, Sparkles, Trash2 } from "lucide-react";
 import type { AppSettings, CodexApprovalPolicy, CodexSandboxPolicy, DesktopPetApi } from "../../../shared/types";
 import { aiProviderPresets, workspaceThemePresets } from "../../utils/constants";
+import { getCodexApprovalLabel, getCodexSandboxLabel } from "../../utils/codexHelpers";
 import { Toggle } from "./Toggle";
 
 export function SettingsPanel({
@@ -31,6 +32,8 @@ export function SettingsPanel({
   const [apiTestBusy, setApiTestBusy] = React.useState(false);
   const [apiTestResult, setApiTestResult] = React.useState<{ ok: boolean; message: string } | null>(null);
   const [updateCheckBusy, setUpdateCheckBusy] = React.useState(false);
+  const [codexCacheBusy, setCodexCacheBusy] = React.useState(false);
+  const [codexCacheResult, setCodexCacheResult] = React.useState<{ ok: boolean; message: string } | null>(null);
 
   React.useEffect(() => {
     setThemeColor(settings.workspaceThemeColor);
@@ -99,7 +102,7 @@ export function SettingsPanel({
     } catch (error) {
       setApiTestResult({
         ok: false,
-        message: error instanceof Error ? error.message : "API 测试失败。"
+        message: error instanceof Error ? error.message : "连接测试失败。"
       });
     } finally {
       setApiTestBusy(false);
@@ -116,12 +119,48 @@ export function SettingsPanel({
     }
   }
 
+  async function clearCodexCache() {
+    if (!api || codexCacheBusy) return;
+    setCodexCacheBusy(true);
+    setCodexCacheResult(null);
+    try {
+      const result = await api.codex.clearCache();
+      const freed = formatBytes(result.freedBytes);
+      const skipped = result.skippedCount ? `；跳过 ${result.skippedCount} 个运行中会话` : "";
+      setCodexCacheResult({
+        ok: true,
+        message: result.deletedCount
+          ? `已清理 ${result.deletedCount} 个临时会话，释放 ${freed}${skipped}`
+          : `没有可清理的 Codex 缓存${skipped}`
+      });
+    } catch (error) {
+      setCodexCacheResult({
+        ok: false,
+        message: error instanceof Error ? error.message : "清理 Codex 缓存失败。"
+      });
+    } finally {
+      setCodexCacheBusy(false);
+    }
+  }
+
+  function formatBytes(bytes: number): string {
+    if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+    const units = ["B", "KB", "MB", "GB"];
+    let value = bytes;
+    let unitIndex = 0;
+    while (value >= 1024 && unitIndex < units.length - 1) {
+      value /= 1024;
+      unitIndex += 1;
+    }
+    return `${value >= 10 || unitIndex === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[unitIndex]}`;
+  }
+
   return (
     <section className="settings">
       <div className="settings-overview">
         <div>
           <strong>设置</strong>
-          <span>调整双击主窗口、AI 服务和桌宠行为。</span>
+          <span>调整 Linnea 主窗口、模型服务和桌宠行为。</span>
         </div>
         <div className="settings-status">
           <span>{settings.aiProviderName ?? aiProviderPresets[settings.aiProvider].label}</span>
@@ -135,7 +174,7 @@ export function SettingsPanel({
             <div className="setting-icon"><Sparkles size={15} /></div>
             <div>
               <strong>模型服务</strong>
-              <span>配置 OpenAI-compatible 服务，用于对话和待办识别。</span>
+              <span>配置对话和待办识别使用的模型服务。</span>
             </div>
           </div>
           <label>
@@ -162,7 +201,7 @@ export function SettingsPanel({
           )}
           <div className="settings-two-column">
             <label>
-              Base URL
+              服务地址
               <input
                 value={aiBaseUrl}
                 onChange={(event) => setAiBaseUrl(event.target.value)}
@@ -181,17 +220,17 @@ export function SettingsPanel({
             </label>
           </div>
           <label>
-            API Key
+            访问密钥
             <input
               value={apiKey}
               onChange={(event) => setApiKey(event.target.value)}
               onBlur={() => persistAiConfig({ aiApiKey: apiKey || undefined, openAiApiKey: apiKey || undefined })}
-              placeholder="也可使用对应环境变量"
+              placeholder="填写模型服务提供的访问密钥"
             />
           </label>
           <div className="settings-inline-actions">
             <button className="settings-action primary" onClick={() => void testApi()} disabled={apiTestBusy}>
-              <Sparkles size={15} /> {apiTestBusy ? "测试中..." : "测试 API"}
+              <Sparkles size={15} /> {apiTestBusy ? "测试中..." : "测试连接"}
             </button>
             {apiTestResult && (
               <div className={`api-test-result ${apiTestResult.ok ? "ok" : "error"}`}>
@@ -206,7 +245,7 @@ export function SettingsPanel({
             <div className="setting-icon"><Sparkles size={15} /></div>
             <div>
               <strong>Codex</strong>
-              <span>设置双击主窗口中 Codex 面板的默认启动方式。</span>
+              <span>设置 Linnea 主窗口中 Codex 面板的默认启动方式。</span>
             </div>
           </div>
           <label>
@@ -215,33 +254,43 @@ export function SettingsPanel({
               value={codexExecutable}
               onChange={(event) => setCodexExecutable(event.target.value)}
               onBlur={() => onChange({ codexExecutable: codexExecutable.trim() || "codex" })}
-              placeholder="codex 或 codex --yolo"
+              placeholder="codex"
             />
           </label>
           <div className="settings-two-column">
             <label>
-              默认 Sandbox
+              默认权限范围
               <select
                 value={settings.codexDefaultSandbox}
                 onChange={(event) => onChange({ codexDefaultSandbox: event.target.value as CodexSandboxPolicy })}
               >
-                <option value="read-only">只读分析</option>
-                <option value="workspace-write">允许修改副本</option>
-                <option value="danger-full-access">完全权限</option>
+                <option value="read-only">{getCodexSandboxLabel("read-only")}</option>
+                <option value="workspace-write">{getCodexSandboxLabel("workspace-write")}</option>
+                <option value="danger-full-access">{getCodexSandboxLabel("danger-full-access")}</option>
               </select>
             </label>
             <label>
-              默认 Approval
+              默认执行前确认
               <select
                 value={settings.codexDefaultApproval}
                 onChange={(event) => onChange({ codexDefaultApproval: event.target.value as CodexApprovalPolicy })}
               >
-                <option value="on-request">需要时询问</option>
-                <option value="never">不询问</option>
+                <option value="on-request">{getCodexApprovalLabel("on-request")}</option>
+                <option value="never">{getCodexApprovalLabel("never")}</option>
               </select>
             </label>
           </div>
-          <div className="setting-hint">可填 codex、完整 codex.cmd 路径，或 codex --yolo。拖拽文件会先复制到隔离工作目录。</div>
+          <div className="setting-hint">保持默认即可使用 Codex；拖拽文件会先复制到隔离工作目录。</div>
+          <div className="settings-inline-actions">
+            <button className="settings-action danger" onClick={() => void clearCodexCache()} disabled={codexCacheBusy}>
+              <Trash2 size={15} /> {codexCacheBusy ? "清理中..." : "清除缓存"}
+            </button>
+            {codexCacheResult && (
+              <div className={`api-test-result ${codexCacheResult.ok ? "ok" : "error"}`}>
+                {codexCacheResult.message}
+              </div>
+            )}
+          </div>
         </section>
 
         <section className="settings-section shortcut-setting" aria-label="快捷键设置">
@@ -264,11 +313,11 @@ export function SettingsPanel({
           <div className="setting-hint">格式示例：CommandOrControl+Shift+Space。</div>
         </section>
 
-        <section className="settings-section theme-setting" aria-label="双击页面主题颜色">
+        <section className="settings-section theme-setting" aria-label="Linnea 主窗口主题颜色">
           <div className="settings-section-header">
             <div className="setting-icon"><Settings size={15} /></div>
             <div>
-              <strong>双击页面主题颜色</strong>
+              <strong>Linnea 主窗口主题颜色</strong>
               <span>同步工作台、提醒气泡和分区强调色。</span>
             </div>
           </div>

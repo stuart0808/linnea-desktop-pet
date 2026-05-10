@@ -165,7 +165,7 @@ export function SummaryPanel({
         <section className="summary-card summary-plan-card">
           <div className="summary-card-title">
             <CalendarDays size={17} />
-            Plan
+            计划
           </div>
           <SummaryPlanGroup title="今日已计划" items={data.scheduledToday} emptyText="今天还没有安排时间块。" onComplete={onToggleTodo} onScheduleToday={scheduleToday} onPostpone={postponeTomorrow} />
           <SummaryPlanGroup title="今日到期但未计划" items={data.dueTodayUnscheduled} emptyText="今天没有到期未计划任务。" onComplete={onToggleTodo} onScheduleToday={scheduleToday} onPostpone={postponeTomorrow} />
@@ -175,7 +175,7 @@ export function SummaryPanel({
         <section className="summary-card summary-review-card">
           <div className="summary-card-title">
             <BarChart3 size={17} />
-            Review
+            复盘
           </div>
           <div className="summary-kpi-strip">
             <Metric label="新增" value={data.todayCreated.length} />
@@ -205,7 +205,7 @@ export function SummaryPanel({
       <aside className="summary-risk-inbox">
         <div className="summary-card-title">
           <AlertTriangle size={17} />
-          Risk Inbox
+          风险收件箱
         </div>
         {data.risks.length === 0 ? (
           <div className="summary-empty">暂无高风险任务。</div>

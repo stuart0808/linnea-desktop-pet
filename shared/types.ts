@@ -148,9 +148,16 @@ export interface SelectionCapture {
   createdAt: string;
 }
 
+export interface SelectionReference {
+  id: string;
+  text: string;
+  createdAt: string;
+}
+
 export interface SelectionAskDraft {
   count: number;
   text: string;
+  items: SelectionReference[];
 }
 
 export type CodexSandboxPolicy = "read-only" | "workspace-write" | "danger-full-access";
@@ -183,6 +190,9 @@ export interface CodexSessionInfo {
   activeThreadId?: string;
   history?: CodexSessionHistory;
   threads?: Record<string, CodexSessionHistory>;
+  pendingRequests?: CodexPendingRequest[];
+  resumeStatus?: CodexResumeStatus;
+  selectionReferences?: SelectionReference[];
 }
 
 export interface CodexSavedSession {
@@ -195,6 +205,20 @@ export interface CodexSavedSession {
   activeThreadId?: string;
   history?: CodexSessionHistory;
   threads?: Record<string, CodexSessionHistory>;
+  resumeStatus?: CodexResumeStatus;
+}
+
+export type CodexResumeStatus =
+  | { status: "ready"; threadId?: string }
+  | { status: "resumeFailed"; threadId: string; message: string }
+  | { status: "localOnly"; threadId?: string; message: string };
+
+export interface CodexPendingRequest {
+  id: number | string;
+  method: string;
+  params: unknown;
+  threadId?: string;
+  createdAt: string;
 }
 
 export interface CodexUiMessage {
@@ -247,6 +271,12 @@ export interface CodexThreadSummary {
   status: string;
   createdAt: number;
   updatedAt: number;
+}
+
+export interface CodexClearCacheResult {
+  deletedCount: number;
+  skippedCount: number;
+  freedBytes: number;
 }
 
 export interface CodexStartOptions {
@@ -340,6 +370,7 @@ export interface DesktopPetApi {
     stopSession(sessionId: string): Promise<void>;
     saveSession(sessionId: string): Promise<CodexSessionInfo>;
     discardSession(sessionId: string): Promise<void>;
+    clearCache(): Promise<CodexClearCacheResult>;
     openWorkspace(sessionId: string): Promise<void>;
   };
   app: {

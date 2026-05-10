@@ -98,7 +98,7 @@ export function PetWindow() {
 
   React.useEffect(() => {
     if (!api) {
-      setBubble("桌宠界面已加载，但 Electron preload API 暂未就绪。");
+      setBubble("Linnea 桌面服务暂未连接，请重启应用。");
       return;
     }
     void refreshSnapshot();
@@ -202,7 +202,7 @@ export function PetWindow() {
         const assistantMessage: ConversationMessage = {
           id: crypto.randomUUID(),
           role: "assistant",
-          text: "界面已显示，但桌面端 API 未连接。请重启 npm run dev。",
+          text: "Linnea 桌面服务暂未连接，请重启应用。",
           createdAt: new Date().toISOString()
         };
         setMessages((current) => [...current, assistantMessage]);
@@ -499,11 +499,11 @@ export function PetWindow() {
           onPointerCancel={handlePetPointerUp}
           onClick={handlePetClick}
           onDoubleClick={handlePetDoubleClick}
-          aria-label="单击对话，双击打开待办，拖动移动位置"
+          aria-label="单击对话，打开 Linnea 主窗口，拖动移动位置"
         >
           <LinneaPet state={visualState} images={currentPetImages} showAlert={hasOverdueOpenTodo} />
         </button>
-        {!api && <div className="debug-banner">Electron API 未连接，当前显示静态桌宠。</div>}
+        {!api && <div className="debug-banner">Linnea 桌面服务暂未连接。</div>}
       </section>
     </main>
   );

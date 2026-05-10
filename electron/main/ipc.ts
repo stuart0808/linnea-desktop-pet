@@ -32,7 +32,7 @@ import {
   listCodexModels, listCodexThreads, resumeCodexThread, newCodexThread,
   getCodexSession, startCodexSession, sendCodexInput, setCodexThreadSettings,
   respondCodexRequest, updateCodexSessionHistory, saveCodexSession, discardCodexSession,
-  stopCodexRuntimeSession, publicCodexSessionInfo
+  stopCodexRuntimeSession, publicCodexSessionInfo, clearClosedCodexTempSessions
 } from "./codex.js";
 import {
   setPetWindowExpanded, openWorkspaceWindow, openSelectionResultWindow,
@@ -266,11 +266,11 @@ export function registerIpc(): void {
     const ai = resolveAiConfig(settings, typeof apiKeyOverride === "string" ? apiKeyOverride : undefined);
     try {
       await testAiConnection(ai);
-      return { ok: true, message: `${ai.providerName} API 连接正常，模型 ${ai.model} 可用。` };
+      return { ok: true, message: `${ai.providerName} 模型服务连接正常，模型 ${ai.model} 可用。` };
     } catch (error) {
       return {
         ok: false,
-        message: error instanceof Error ? error.message : "API 测试失败。"
+        message: error instanceof Error ? error.message : "连接测试失败。"
       };
     }
   });
@@ -542,6 +542,7 @@ export function registerIpc(): void {
   });
   ipcMain.handle("codex:saveSession", (_event, sessionId: unknown) => saveCodexSession(validateCodexSessionId(sessionId)));
   ipcMain.handle("codex:discardSession", (_event, sessionId: unknown) => discardCodexSession(validateCodexSessionId(sessionId)));
+  ipcMain.handle("codex:clearCache", () => clearClosedCodexTempSessions());
   ipcMain.handle("codex:openWorkspace", async (_event, sessionId: unknown) => {
     const session = getCodexSession(validateCodexSessionId(sessionId));
     if (!existsSync(session.workspacePath)) throw new Error("工作目录不存在。");

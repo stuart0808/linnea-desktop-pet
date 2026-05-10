@@ -1,7 +1,7 @@
 import { BrowserWindow, Tray } from "electron";
 import { type ChildProcessWithoutNullStreams } from "node:child_process";
 import WebSocket from "ws";
-import type { CodexSessionHistory, CodexSessionInfo, CodexStartOptions, SelectionCapture, SelectionTextResult } from "../../shared/types.js";
+import type { CodexPendingRequest, CodexSessionHistory, CodexSessionInfo, CodexStartOptions, SelectionCapture, SelectionReference, SelectionTextResult } from "../../shared/types.js";
 
 export interface CodexRuntimeSession extends CodexSessionInfo {
   rootPath: string;
@@ -9,11 +9,13 @@ export interface CodexRuntimeSession extends CodexSessionInfo {
   appSocket?: WebSocket;
   appReady?: Promise<void>;
   requestSeq?: number;
-  pendingRequests?: Map<number | string, { resolve(value: unknown): void; reject(error: Error): void }>;
+  pendingClientRequests?: Map<number | string, { resolve(value: unknown): void; reject(error: Error): void }>;
+  pendingServerRequests?: Map<string, CodexPendingRequest>;
   threadId?: string;
   startOptions?: CodexStartOptions;
   activeThreadId?: string;
   threads?: Record<string, CodexSessionHistory>;
+  selectionReferences?: SelectionReference[];
 }
 
 export const collapsedPetBounds = { width: 180, height: 300 };

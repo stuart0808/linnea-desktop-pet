@@ -3,6 +3,7 @@ import type {
   CodexApprovalPolicy,
   CodexDropItem,
   CodexModelSummary,
+  CodexPendingRequest,
   CodexReasoningEffort,
   CodexSandboxPolicy,
   CodexSessionInfo,
@@ -34,6 +35,16 @@ export function normalizeCodexSandbox(value: string | null | undefined): CodexSa
 
 export function normalizeCodexApproval(value: string | null | undefined): CodexApprovalPolicy {
   return value === "never" ? "never" : "on-request";
+}
+
+export function getCodexSandboxLabel(value: CodexSandboxPolicy): string {
+  if (value === "read-only") return "只读分析";
+  if (value === "danger-full-access") return "完全权限";
+  return "允许修改副本";
+}
+
+export function getCodexApprovalLabel(value: CodexApprovalPolicy): string {
+  return value === "never" ? "不询问" : "需要时询问";
 }
 
 export function hasFileDrop(event: React.DragEvent) {
@@ -72,6 +83,17 @@ export function getCodexActiveThreadSettings(session: CodexSessionInfo | null): 
 
 export function applyCodexThreadEventToSession(session: CodexSessionInfo, payload: unknown, threadId: string): CodexSessionInfo {
   const value = payload as any;
+  if (value?.type === "threadResumeFailed") {
+    return {
+      ...session,
+      activeThreadId: threadId,
+      resumeStatus: {
+        status: "resumeFailed",
+        threadId,
+        message: typeof value.message === "string" ? value.message : "Codex thread resume failed"
+      }
+    };
+  }
   if (value?.type !== "threadSettings") return { ...session, activeThreadId: threadId };
   const settings = sanitizeClientCodexThreadSettings(value.settings);
   const threads = { ...(session.threads ?? {}) };
@@ -125,7 +147,7 @@ export async function handleLocalCodexCommand({
       ...(effort ? { reasoningEffort: effort } : {})
     });
     setSession(next);
-    setStatusText(`当前 Thread 已切换到 ${getCodexModelLabel(selected?.id ?? model, models)}${effort ? ` / ${effort}` : ""}`);
+    setStatusText(`当前线程已切换到 ${getCodexModelLabel(selected?.id ?? model, models)}${effort ? ` / ${effort}` : ""}`);
     return true;
   }
   if (command === "/plan") {
@@ -138,7 +160,7 @@ export async function handleLocalCodexCommand({
         : "plan";
     const next = await api.codex.setThreadSettings(session.id, { mode });
     setSession(next);
-    setStatusText(mode === "plan" ? "当前 Thread 已进入 Plan 模式" : "当前 Thread 已退出 Plan 模式");
+    setStatusText(mode === "plan" ? "当前线程已进入计划模式" : "当前线程已退出计划模式");
     return true;
   }
   return false;
@@ -179,6 +201,18 @@ export function stripCodexPlanModeInstruction(text: string) {
   return text.startsWith(prefix) ? text.slice(prefix.length) : text;
 }
 
+export function stripSelectionAskPrompt(text: string) {
+  const marker = "\n\n我的问题是：";
+  if (!text.startsWith("我想基于以下引用内容提问：\n\n")) return text;
+  const index = text.lastIndexOf(marker);
+  if (index < 0) return text;
+  return text.slice(index + marker.length).trimStart();
+}
+
+export function stripHiddenCodexPromptText(text: string) {
+  return stripSelectionAskPrompt(stripCodexPlanModeInstruction(text));
+}
+
 export function getCodexEventThreadId(payload: unknown) {
   const value = payload as any;
   if (typeof value?.params?.threadId === "string") return value.params.threadId;
@@ -217,7 +251,7 @@ export function applyCodexUiEvent(
   state: {
     setMessages: React.Dispatch<React.SetStateAction<CodexUiMessage[]>>;
     setActivity: React.Dispatch<React.SetStateAction<CodexUiActivity[]>>;
-    setRequests: React.Dispatch<React.SetStateAction<Array<{ id: number | string; method: string; params: any }>>>;
+    setRequests: React.Dispatch<React.SetStateAction<CodexPendingRequest[]>>;
     setRawEvents: React.Dispatch<React.SetStateAction<string[]>>;
     setStatus: React.Dispatch<React.SetStateAction<"starting" | "running" | "exited" | "error">>;
     setStatusText: React.Dispatch<React.SetStateAction<string>>;
@@ -228,7 +262,25 @@ export function applyCodexUiEvent(
   state.setRawEvents((current) => [...current.slice(-80), JSON.stringify(payload)]);
   if (kind === "request") {
     state.setResponding(false);
-    state.setRequests((current) => [...current, { id: payload.id, method, params: payload.params }]);
+    state.setRequests((current) => {
+      const nextRequest: CodexPendingRequest = {
+        id: payload.id,
+        method,
+        params: payload.params,
+        threadId: typeof payload.params?.threadId === "string" ? payload.params.threadId : undefined,
+        createdAt: new Date().toISOString()
+      };
+      return current.some((request) => request.id === payload.id)
+        ? current.map((request) => request.id === payload.id ? nextRequest : request)
+        : [...current, nextRequest];
+    });
+    return;
+  }
+  if (kind === "requestResolved" || method === "serverRequest/resolved") {
+    const requestId = payload?.params?.requestId ?? payload?.params?.id ?? payload?.id;
+    if (requestId !== undefined) {
+      state.setRequests((current) => current.filter((request) => request.id !== requestId));
+    }
     return;
   }
   if (kind === "error") {
@@ -245,26 +297,35 @@ export function applyCodexUiEvent(
     return;
   }
   if (kind === "thread") {
+    if (payload?.type === "threadResumeFailed") {
+      state.setStatus("error");
+      state.setStatusText(`线程恢复失败：${payload.message ?? "Codex 无法恢复该线程"}`);
+      state.setResponding(false);
+      return;
+    }
     state.setStatus("running");
     state.setStatusText("Codex 已连接");
     return;
   }
   if (kind === "status") {
     const status = payload?.status;
-    if (status === "startingAppServer") state.setStatusText("正在启动 Codex app-server...");
+    if (status === "startingAppServer") state.setStatusText("正在启动 Codex 服务...");
     else if (status === "connected") state.setStatusText("正在连接 Codex...");
     else if (status === "socketClosed") {
       state.setStatus("exited");
       state.setStatusText("Codex 连接已关闭");
       state.setResponding(false);
+      state.setRequests([]);
     } else if (status === "stopped") {
       state.setStatus("exited");
       state.setStatusText("Codex 已停止");
       state.setResponding(false);
+      state.setRequests([]);
     } else if (status === "exited") {
       state.setStatus("exited");
-      state.setStatusText("Codex app-server 已退出");
+      state.setStatusText("Codex 服务已退出");
       state.setResponding(false);
+      state.setRequests([]);
     }
     return;
   }
@@ -273,7 +334,7 @@ export function applyCodexUiEvent(
     if (!item?.id) return;
     if (method === "item/started" && item.type !== "userMessage") state.setResponding(true);
     if (item.type === "userMessage") {
-      const text = stripCodexPlanModeInstruction((item.content ?? []).map((part: any) => part.text).filter(Boolean).join("\n"));
+      const text = stripHiddenCodexPromptText((item.content ?? []).map((part: any) => part.text).filter(Boolean).join("\n"));
       upsertCodexMessage(state.setMessages, item.id, "user", text);
     } else if (item.type === "agentMessage") {
       upsertCodexMessage(state.setMessages, item.id, "assistant", item.text ?? "");
@@ -303,6 +364,10 @@ export function applyCodexUiEvent(
   } else if (method === "turn/completed") {
     state.setStatusText("Codex 空闲");
     state.setResponding(false);
+  } else if (method === "turn/interrupt" || method === "turn/interrupted") {
+    state.setStatusText("Codex 已中断");
+    state.setResponding(false);
+    state.setRequests([]);
   }
 }
 

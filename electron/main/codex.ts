@@ -4,13 +4,14 @@ import { spawn as spawnChild } from "node:child_process";
 import { cp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, delimiter, extname, isAbsolute, join } from "node:path";
+import { basename, delimiter, extname, isAbsolute, join, sep } from "node:path";
 import WebSocket from "ws";
-import type { CodexApprovalPolicy, CodexCopiedItem, CodexCreateSessionOptions, CodexDropItem, CodexReasoningEffort, CodexSandboxPolicy, CodexSavedSession, CodexSessionHistory, CodexSessionInfo, CodexStartOptions, CodexThreadMode, CodexThreadSettings } from "../../shared/types.js";
+import type { CodexApprovalPolicy, CodexClearCacheResult, CodexCopiedItem, CodexCreateSessionOptions, CodexDropItem, CodexPendingRequest, CodexReasoningEffort, CodexSandboxPolicy, CodexSavedSession, CodexSessionHistory, CodexSessionInfo, CodexStartOptions, CodexThreadMode, CodexThreadSettings, SelectionReference } from "../../shared/types.js";
 import { state, type CodexRuntimeSession } from "./state.js";
 import { JsonStore } from "./storage.js";
 import { broadcastCodexEvent } from "./broadcast.js";
 import { getPreloadPath, getRendererUrl, getAppIconPath, lockdownWindow } from "./windowUtils.js";
+import { setCreateCodexSession } from "./selection.js";
 
 const store = new JsonStore();
 
@@ -70,6 +71,10 @@ function getExecutableSearchPaths(): string[] {
   return Array.from(new Set(paths));
 }
 
+function getCodexTempRoot(): string {
+  return join(tmpdir(), "linnea-codex");
+}
+
 function sanitizeCodexDropItem(item: CodexDropItem): CodexDropItem | null {
   if (!item || typeof item.path !== "string") return null;
   const itemPath = item.path.trim();
@@ -81,11 +86,11 @@ function sanitizeCodexDropItem(item: CodexDropItem): CodexDropItem | null {
   };
 }
 
-export async function createCodexSession(items: CodexDropItem[], options: CodexCreateSessionOptions, openWindow = true, allowEmpty = false, draftPrompt = ""): Promise<CodexSessionInfo> {
+export async function createCodexSession(items: CodexDropItem[], options: CodexCreateSessionOptions, openWindow = true, allowEmpty = false, draftPrompt = "", selectionReferences: SelectionReference[] = []): Promise<CodexSessionInfo> {
   const normalizedItems = items.map(sanitizeCodexDropItem).filter((item): item is CodexDropItem => Boolean(item));
   if (!normalizedItems.length && !allowEmpty) throw new Error("请先拖入至少一个文件或文件夹。");
   const sessionId = randomUUID();
-  const rootPath = join(tmpdir(), "linnea-codex", sessionId);
+  const rootPath = join(getCodexTempRoot(), sessionId);
   const workspacePath = join(rootPath, "workspace");
   await mkdir(workspacePath, { recursive: true });
   const usedNames = new Set<string>();
@@ -108,7 +113,8 @@ export async function createCodexSession(items: CodexDropItem[], options: CodexC
     workspacePath,
     copiedItems,
     saved: false,
-    createdAt: new Date().toISOString()
+    createdAt: new Date().toISOString(),
+    selectionReferences: sanitizeSelectionReferences(selectionReferences)
   };
   state.codexSessions.set(sessionId, session);
   if (openWindow) await openCodexWindow(session.id, options, draftPrompt);
@@ -164,11 +170,25 @@ async function readCodexSavedMetadata(rootPath: string): Promise<CodexSavedSessi
       createdAt: parsed.createdAt || new Date().toISOString(),
       activeThreadId: parsed.activeThreadId,
       history: sanitizeCodexSessionHistory(parsed.history),
-      threads: sanitizeCodexThreadHistories(parsed.threads)
+      threads: sanitizeCodexThreadHistories(parsed.threads),
+      resumeStatus: sanitizeCodexResumeStatus(parsed.resumeStatus)
     };
   } catch {
     return null;
   }
+}
+
+function sanitizeCodexResumeStatus(value: unknown): CodexSessionInfo["resumeStatus"] | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const input = value as Partial<NonNullable<CodexSessionInfo["resumeStatus"]>>;
+  if (input.status === "ready") return { status: "ready", threadId: typeof input.threadId === "string" ? input.threadId : undefined };
+  if (input.status === "resumeFailed" && typeof input.threadId === "string") {
+    return { status: "resumeFailed", threadId: input.threadId, message: typeof input.message === "string" ? input.message : "Codex thread resume failed" };
+  }
+  if (input.status === "localOnly") {
+    return { status: "localOnly", threadId: typeof input.threadId === "string" ? input.threadId : undefined, message: typeof input.message === "string" ? input.message : "Only local history is available" };
+  }
+  return undefined;
 }
 
 function sanitizeCodexSessionHistory(value: unknown): CodexSessionHistory | undefined {
@@ -181,7 +201,7 @@ function sanitizeCodexSessionHistory(value: unknown): CodexSessionHistory | unde
           .map((item) => ({
             id: item.id,
             role: item.role === "user" || item.role === "assistant" || item.role === "system" ? item.role : "system",
-            text: item.role === "user" ? stripCodexPlanModeInstruction(item.text) : item.text
+            text: item.role === "user" ? stripHiddenCodexPromptText(item.text) : item.text
           }))
       : [],
     activity: Array.isArray(input.activity)
@@ -233,6 +253,23 @@ function sanitizeCodexThreadHistories(value: unknown): Record<string, CodexSessi
   return result;
 }
 
+function sanitizeSelectionReferences(value: unknown): SelectionReference[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item) => item && typeof item === "object")
+    .map((item) => {
+      const input = item as Partial<SelectionReference>;
+      const text = typeof input.text === "string" ? input.text.trim().slice(0, 8000) : "";
+      if (!text) return null;
+      return {
+        id: typeof input.id === "string" && input.id.trim() ? input.id.trim() : randomUUID(),
+        text,
+        createdAt: typeof input.createdAt === "string" && input.createdAt.trim() ? input.createdAt.trim() : new Date().toISOString()
+      };
+    })
+    .filter((item): item is SelectionReference => Boolean(item));
+}
+
 export async function openSavedCodexSession(savedSessionId: string, options: CodexCreateSessionOptions): Promise<CodexSessionInfo> {
   const saved = (await listSavedCodexSessions()).find((item) => item.id === savedSessionId);
   if (!saved) throw new Error("Saved Codex session not found");
@@ -257,7 +294,8 @@ export async function openSavedCodexSession(savedSessionId: string, options: Cod
     activeThreadId: saved.activeThreadId,
     threadId: saved.activeThreadId,
     history: getActiveCodexHistory(saved.activeThreadId, saved.threads, saved.history),
-    threads: saved.threads
+    threads: saved.threads,
+    resumeStatus: saved.resumeStatus
   };
   state.codexSessions.set(sessionId, session);
   return publicCodexSessionInfo(session);
@@ -288,12 +326,19 @@ export function publicCodexSessionInfo(session: CodexRuntimeSession): CodexSessi
     createdAt: session.createdAt,
     activeThreadId: session.threadId ?? session.activeThreadId,
     history: getActiveCodexHistory(session.threadId ?? session.activeThreadId, session.threads, session.history),
-    threads: session.threads
+    threads: session.threads,
+    pendingRequests: getCodexPendingServerRequests(session),
+    resumeStatus: session.resumeStatus,
+    selectionReferences: session.selectionReferences
   };
 }
 
 function getActiveCodexHistory(threadId?: string, threads?: Record<string, CodexSessionHistory>, fallback?: CodexSessionHistory): CodexSessionHistory | undefined {
   return threadId && threads?.[threadId] ? threads[threadId] : fallback;
+}
+
+function getCodexPendingServerRequests(session: CodexRuntimeSession): CodexPendingRequest[] {
+  return Array.from(session.pendingServerRequests?.values() ?? []).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 }
 
 export async function openCodexWindow(sessionId: string, options: CodexCreateSessionOptions, draftPrompt = ""): Promise<void> {
@@ -395,13 +440,14 @@ async function cleanupClosedCodexWindowSession(session: CodexRuntimeSession, dis
 async function ensureCodexAppSession(session: CodexRuntimeSession): Promise<void> {
   if (session.appReady) return session.appReady;
   session.requestSeq = 1;
-  session.pendingRequests = new Map();
+  session.pendingClientRequests = new Map();
+  session.pendingServerRequests = new Map();
   session.appReady = new Promise<void>((resolve, reject) => {
     const command = prepareCodexAppServerSpawnCommand();
     let settled = false;
     const child = spawnChild(command.executable, command.args, {
       cwd: session.workspacePath,
-      env: process.env as NodeJS.ProcessEnv
+      env: createCodexAppServerEnv()
     });
     session.appServer = child;
     let stderr = "";
@@ -433,11 +479,19 @@ async function ensureCodexAppSession(session: CodexRuntimeSession): Promise<void
       broadcastCodexEvent(session.id, "status", { status: "exited", code, signal });
       if (!settled && !session.threadId) {
         settled = true;
-        reject(new Error(`Codex app-server exited before initialization (${code ?? signal ?? "unknown"}). ${stderr}`.trim()));
+        reject(new Error(`Codex 服务在初始化前退出（${code ?? signal ?? "unknown"}）。${stderr}`.trim()));
       }
     });
   });
   return session.appReady;
+}
+
+function createCodexAppServerEnv(): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    MPLBACKEND: "Agg",
+    PYTHONUNBUFFERED: "1"
+  };
 }
 
 function stripAnsi(value: string): string {
@@ -477,15 +531,17 @@ function connectCodexAppSocket(session: CodexRuntimeSession, url: string): Promi
               cwd: session.workspacePath,
               approvalPolicy: normalizeCodexApproval(session.startOptions?.approval),
               sandbox: normalizeCodexSandbox(session.startOptions?.sandbox),
-              excludeTurns: true
+              excludeTurns: false
             }) as { thread?: { id?: string } };
-          } catch {
-            startResult = await codexRequest(session, "thread/start", {
-              cwd: session.workspacePath,
-              approvalPolicy: normalizeCodexApproval(session.startOptions?.approval),
-              sandbox: normalizeCodexSandbox(session.startOptions?.sandbox),
-              sessionStartSource: "startup"
-            }) as { thread?: { id?: string } };
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            session.threadId = undefined;
+            session.activeThreadId = existingThreadId;
+            session.resumeStatus = { status: "resumeFailed", threadId: existingThreadId, message };
+            broadcastCodexEvent(session.id, "thread", { type: "threadResumeFailed", threadId: existingThreadId, message });
+            if (session.saved) void writeCodexSavedMetadata(session).catch(() => undefined);
+            resolve();
+            return;
           }
         } else {
           startResult = await codexRequest(session, "thread/start", {
@@ -504,13 +560,17 @@ function connectCodexAppSocket(session: CodexRuntimeSession, url: string): Promi
         }
         session.threadId = newThreadId;
         session.activeThreadId = session.threadId;
+        session.resumeStatus = { status: "ready", threadId: session.threadId };
         session.threads[session.threadId] = session.threads[session.threadId] ?? { messages: [], activity: [] };
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const resumedHistory = codexHistoryFromThread((startResult as any)?.thread);
+        if (resumedHistory.messages.length || resumedHistory.activity.length) session.threads[session.threadId] = resumedHistory;
         session.history = session.threads[session.threadId];
         applyCodexThreadResponseSettings(session.history, startResult);
         broadcastCodexEvent(session.id, "thread", { ...startResult, threadId: session.threadId });
         resolve();
       } catch (error) {
-        reject(error instanceof Error ? error : new Error("Codex app-server initialization failed"));
+        reject(error instanceof Error ? error : new Error("Codex 服务初始化失败"));
       }
     });
     ws.on("message", (data) => handleCodexAppMessage(session, data.toString()));
@@ -535,23 +595,43 @@ function handleCodexAppMessage(session: CodexRuntimeSession, text: string): void
     return;
   }
   if ("id" in message && ("result" in message || "error" in message)) {
-    const pending = session.pendingRequests?.get(message.id);
+    const pending = session.pendingClientRequests?.get(message.id);
     if (pending) {
-      session.pendingRequests?.delete(message.id);
+      session.pendingClientRequests?.delete(message.id);
       if (message.error) pending.reject(new Error(message.error.message || "Codex request failed"));
       else pending.resolve(message.result);
     }
     return;
   }
-  if (message.id && message.method) {
+  if ("id" in message && message.method) {
+    rememberCodexPendingServerRequest(session, message);
     broadcastCodexEvent(session.id, "request", message);
     return;
   }
   if (message.method) {
     const kind = getCodexEventKind(message.method);
+    if (message.method === "serverRequest/resolved") forgetCodexPendingServerRequest(session, message.params?.requestId ?? message.params?.id ?? message.id);
     captureCodexEventInSessionHistory(session, message);
     broadcastCodexEvent(session.id, kind, message);
   }
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function rememberCodexPendingServerRequest(session: CodexRuntimeSession, message: any): void {
+  session.pendingServerRequests = session.pendingServerRequests ?? new Map();
+  const request: CodexPendingRequest = {
+    id: message.id,
+    method: String(message.method),
+    params: message.params,
+    threadId: typeof message.params?.threadId === "string" ? message.params.threadId : session.threadId ?? session.activeThreadId,
+    createdAt: new Date().toISOString()
+  };
+  session.pendingServerRequests.set(String(message.id), request);
+}
+
+function forgetCodexPendingServerRequest(session: CodexRuntimeSession, requestId: unknown): void {
+  if (requestId === undefined || requestId === null) return;
+  session.pendingServerRequests?.delete(String(requestId));
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -567,7 +647,7 @@ function captureCodexEventInSessionHistory(session: CodexRuntimeSession, message
     if (!item?.id) return;
     if (item.type === "userMessage") {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const text = stripCodexPlanModeInstruction((item.content ?? []).map((part: any) => part.text).filter(Boolean).join("\n"));
+      const text = stripHiddenCodexPromptText((item.content ?? []).map((part: any) => part.text).filter(Boolean).join("\n"));
       upsertCodexHistoryMessage(history, item.id, "user", text);
     } else if (item.type === "agentMessage") {
       upsertCodexHistoryMessage(history, item.id, "assistant", item.text ?? "");
@@ -626,32 +706,37 @@ function getCodexEventKind(method: string): "status" | "thread" | "item" | "delt
 }
 
 function codexRequest(session: CodexRuntimeSession, method: string, params: unknown): Promise<unknown> {
-  if (!session.appSocket || session.appSocket.readyState !== WebSocket.OPEN) throw new Error("Codex app-server is not connected");
+  if (!session.appSocket || session.appSocket.readyState !== WebSocket.OPEN) throw new Error("Codex 服务未连接");
   const id = session.requestSeq ?? 1;
   session.requestSeq = id + 1;
   const payload = { id, method, params };
   session.appSocket.send(JSON.stringify(payload));
   return new Promise<unknown>((resolve, reject) => {
-    session.pendingRequests?.set(id, { resolve, reject });
+    session.pendingClientRequests?.set(id, { resolve, reject });
     setTimeout(() => {
-      if (!session.pendingRequests?.has(id)) return;
-      session.pendingRequests.delete(id);
+      if (!session.pendingClientRequests?.has(id)) return;
+      session.pendingClientRequests.delete(id);
       reject(new Error(`Codex request timed out: ${method}`));
     }, 30_000);
   });
 }
 
 function codexNotify(session: CodexRuntimeSession, method: string, params?: unknown): void {
-  if (!session.appSocket || session.appSocket.readyState !== WebSocket.OPEN) throw new Error("Codex app-server is not connected");
+  if (!session.appSocket || session.appSocket.readyState !== WebSocket.OPEN) throw new Error("Codex 服务未连接");
   session.appSocket.send(JSON.stringify(params === undefined ? { method } : { method, params }));
 }
 
 export async function sendCodexInput(session: CodexRuntimeSession, text: string): Promise<void> {
   await ensureCodexAppSession(session);
+  if (session.resumeStatus?.status === "resumeFailed") {
+    throw new Error(`Codex 线程恢复失败，不能继续发送消息，以免对话记录和真实上下文不一致。请新建线程后继续。\n${session.resumeStatus.message}`);
+  }
   if (!session.threadId) throw new Error("Codex thread is not ready");
   const sandbox = normalizeCodexSandbox(session.startOptions?.sandbox);
   const threadSettings = getActiveCodexThreadSettings(session);
-  const turnText = threadSettings.mode === "plan" ? withCodexPlanModeInstruction(text) : text;
+  const references = sanitizeSelectionReferences(session.selectionReferences);
+  const inputText = references.length ? withSelectionReferences(text, references) : text;
+  const turnText = threadSettings.mode === "plan" ? withCodexPlanModeInstruction(inputText) : inputText;
   const params = {
     threadId: session.threadId,
     input: [{ type: "text", text: turnText, text_elements: [] }],
@@ -663,19 +748,20 @@ export async function sendCodexInput(session: CodexRuntimeSession, text: string)
   };
   try {
     await codexRequest(session, "turn/start", params);
+    if (references.length) session.selectionReferences = [];
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (!message.includes("thread not found")) throw error;
-    const missingThreadId = session.threadId;
-    await codexRequest(session, "thread/resume", {
-      threadId: missingThreadId,
-      cwd: session.workspacePath,
-      approvalPolicy: normalizeCodexApproval(session.startOptions?.approval),
-      sandbox: normalizeCodexSandbox(session.startOptions?.sandbox),
-      excludeTurns: true
-    });
-    await codexRequest(session, "turn/start", params);
+    session.resumeStatus = { status: "resumeFailed", threadId: session.threadId, message };
+    throw new Error(`Codex 没有找到该线程，已停止发送以避免上下文漂移。请新建线程后继续。\n${message}`);
   }
+}
+
+function withSelectionReferences(question: string, references: SelectionReference[]): string {
+  const body = references
+    .map((reference, index) => `[引用 ${index + 1}]\n${reference.text.trim()}`)
+    .join("\n\n");
+  return `我想基于以下引用内容提问：\n\n${body}\n\n我的问题是：\n${question.trim()}`;
 }
 
 function getActiveCodexThreadSettings(session: CodexRuntimeSession): CodexThreadSettings {
@@ -696,6 +782,18 @@ function stripCodexPlanModeInstruction(text: string): string {
   return text.startsWith(prefix) ? text.slice(prefix.length) : text;
 }
 
+function stripSelectionAskPrompt(text: string): string {
+  const marker = "\n\n我的问题是：";
+  if (!text.startsWith("我想基于以下引用内容提问：\n\n")) return text;
+  const index = text.lastIndexOf(marker);
+  if (index < 0) return text;
+  return text.slice(index + marker.length).trimStart();
+}
+
+function stripHiddenCodexPromptText(text: string): string {
+  return stripSelectionAskPrompt(stripCodexPlanModeInstruction(text));
+}
+
 function toCodexSandboxPolicy(sandbox: CodexSandboxPolicy, workspacePath: string) {
   if (sandbox === "danger-full-access") return { type: "dangerFullAccess" };
   if (sandbox === "read-only") return { type: "readOnly", networkAccess: true };
@@ -710,8 +808,9 @@ function toCodexSandboxPolicy(sandbox: CodexSandboxPolicy, workspacePath: string
 
 export function respondCodexRequest(sessionId: string, requestId: number | string, response: unknown): void {
   const session = getCodexSession(sessionId);
-  if (!session.appSocket || session.appSocket.readyState !== WebSocket.OPEN) throw new Error("Codex app-server is not connected");
+  if (!session.appSocket || session.appSocket.readyState !== WebSocket.OPEN) throw new Error("Codex 服务未连接");
   session.appSocket.send(JSON.stringify({ id: requestId, result: response }));
+  forgetCodexPendingServerRequest(session, requestId);
 }
 
 export async function listCodexModels(sessionId: string) {
@@ -784,8 +883,8 @@ export async function listCodexThreads(sessionId: string) {
     const firstMessage = history.messages.find((message) => message.text.trim());
     merged.set(threadId, {
       id: threadId,
-      preview: firstMessage?.text.slice(0, 120) || "空 Thread",
-      name: threadId === session.threadId ? "当前 Thread" : null,
+      preview: firstMessage?.text.slice(0, 120) || "空线程",
+      name: threadId === session.threadId ? "当前线程" : null,
       path: null,
       cwd: session.workspacePath,
       source: "linnea",
@@ -828,7 +927,7 @@ export async function resumeCodexThread(sessionId: string, threadId: string): Pr
   const session = getCodexSession(sessionId);
   await ensureCodexAppSession(session);
   pruneEmptyInactiveCodexThreads(session, threadId);
-  if (session.threadId === threadId) {
+  if (session.threadId === threadId && session.resumeStatus?.status !== "resumeFailed") {
     session.threadId = threadId;
     session.activeThreadId = threadId;
     session.history = getActiveCodexHistory(threadId, session.threads, session.history);
@@ -848,13 +947,18 @@ export async function resumeCodexThread(sessionId: string, threadId: string): Pr
     });
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
-    throw new Error(`无法恢复 Thread ${threadId}。它可能还没有被 Codex 持久化，或已不在当前 app-server 中。\n${detail}`);
+    session.threadId = undefined;
+    session.activeThreadId = threadId;
+    session.resumeStatus = { status: "resumeFailed", threadId, message: detail };
+    if (session.saved) void writeCodexSavedMetadata(session).catch(() => undefined);
+    throw new Error(`无法恢复线程 ${threadId}。它可能还没有被 Codex 保存，或已不在当前 Codex 服务中。\n${detail}`);
   }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const thread = (result as any)?.thread ?? result;
   if (!thread?.id) throw new Error("Codex did not return a resumed thread");
   session.threadId = String(thread.id);
   session.activeThreadId = session.threadId;
+  session.resumeStatus = { status: "ready", threadId: session.threadId };
   session.threads = session.threads ?? {};
   const resumedHistory = codexHistoryFromThread(thread);
   session.threads[session.threadId] = resumedHistory.messages.length || resumedHistory.activity.length
@@ -884,6 +988,7 @@ export async function newCodexThread(sessionId: string): Promise<CodexSessionInf
   if (!threadId) throw new Error("Codex did not return a thread id");
   session.threadId = threadId;
   session.activeThreadId = threadId;
+  session.resumeStatus = { status: "ready", threadId };
   session.threads = session.threads ?? {};
   session.threads[threadId] = { messages: [], activity: [] };
   session.history = session.threads[threadId];
@@ -916,7 +1021,7 @@ function codexHistoryFromThread(thread: any): CodexSessionHistory {
       if (!item?.id) continue;
       if (item.type === "userMessage") {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const text = stripCodexPlanModeInstruction((item.content ?? []).map((part: any) => part.text).filter(Boolean).join("\n"));
+        const text = stripHiddenCodexPromptText((item.content ?? []).map((part: any) => part.text).filter(Boolean).join("\n"));
         messages.push({ id: item.id, role: "user", text });
       } else if (item.type === "agentMessage") {
         messages.push({ id: item.id, role: "assistant", text: item.text ?? "" });
@@ -971,7 +1076,8 @@ export async function saveCodexSession(sessionId: string): Promise<CodexSessionI
     createdAt: session.createdAt,
     activeThreadId: session.threadId ?? session.activeThreadId,
     history: getActiveCodexHistory(session.threadId ?? session.activeThreadId, session.threads, session.history),
-    threads: session.threads
+    threads: session.threads,
+    resumeStatus: session.resumeStatus
   };
   await writeFile(join(targetPath, "linnea-codex-session.json"), JSON.stringify(metadata, null, 2), "utf8");
   session.saved = true;
@@ -1016,7 +1122,8 @@ async function writeCodexSavedMetadata(session: CodexRuntimeSession): Promise<vo
     createdAt: session.createdAt,
     activeThreadId: session.threadId ?? session.activeThreadId,
     history: getActiveCodexHistory(session.threadId ?? session.activeThreadId, session.threads, session.history),
-    threads: session.threads
+    threads: session.threads,
+    resumeStatus: session.resumeStatus
   };
   await writeFile(join(rootPath, "linnea-codex-session.json"), JSON.stringify(metadata, null, 2), "utf8");
 }
@@ -1063,6 +1170,64 @@ export async function discardCodexSession(sessionId: string): Promise<void> {
   state.codexSessions.delete(sessionId);
 }
 
+export async function clearClosedCodexTempSessions(): Promise<CodexClearCacheResult> {
+  const root = getCodexTempRoot();
+  const entries = await readdir(root, { withFileTypes: true }).catch(() => []);
+  const activeRoots = getActiveCodexCacheRoots();
+  let deletedCount = 0;
+  let skippedCount = 0;
+  let freedBytes = 0;
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const targetPath = join(root, entry.name);
+    if (!isPathInsideDirectory(targetPath, root)) continue;
+    if (activeRoots.has(normalizeCachePath(targetPath))) {
+      skippedCount += 1;
+      continue;
+    }
+    const size = await getDirectorySize(targetPath);
+    await removeCodexDirectory(targetPath);
+    deletedCount += 1;
+    freedBytes += size;
+  }
+
+  return { deletedCount, skippedCount, freedBytes };
+}
+
+function getActiveCodexCacheRoots(): Set<string> {
+  const root = getCodexTempRoot();
+  const activeRoots = new Set<string>();
+  for (const session of state.codexSessions.values()) {
+    for (const candidate of [session.rootPath, session.savedPath]) {
+      if (candidate && isPathInsideDirectory(candidate, root)) activeRoots.add(normalizeCachePath(candidate));
+    }
+  }
+  return activeRoots;
+}
+
+function isPathInsideDirectory(targetPath: string, directoryPath: string): boolean {
+  const target = normalizeCachePath(targetPath);
+  const directory = normalizeCachePath(directoryPath);
+  return target === directory || target.startsWith(`${directory}${sep}`);
+}
+
+function normalizeCachePath(value: string): string {
+  const normalized = value.replace(/[\\/]+$/g, "");
+  return process.platform === "win32" ? normalized.toLowerCase() : normalized;
+}
+
+async function getDirectorySize(targetPath: string): Promise<number> {
+  const entries = await readdir(targetPath, { withFileTypes: true }).catch(() => []);
+  let total = 0;
+  for (const entry of entries) {
+    const itemPath = join(targetPath, entry.name);
+    if (entry.isDirectory()) total += await getDirectorySize(itemPath);
+    else if (entry.isFile()) total += (await stat(itemPath).catch(() => null))?.size ?? 0;
+  }
+  return total;
+}
+
 export async function stopCodexRuntimeSession(session: CodexRuntimeSession): Promise<void> {
   if (session.appSocket) {
     const socket = session.appSocket;
@@ -1086,7 +1251,8 @@ export async function stopCodexRuntimeSession(session: CodexRuntimeSession): Pro
   }
   session.appReady = undefined;
   session.threadId = undefined;
-  session.pendingRequests?.clear();
+  session.pendingClientRequests?.clear();
+  session.pendingServerRequests?.clear();
 }
 
 async function removeCodexDirectory(targetPath: string): Promise<void> {
@@ -1114,7 +1280,4 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// Wire up the createCodexSession callback in selection.ts at module load time.
-// selection.ts cannot import codex.ts, so we inject the callback here.
-import { setCreateCodexSession } from "./selection.js";
 setCreateCodexSession(createCodexSession);

@@ -110,7 +110,7 @@ export function WorkspaceWindow() {
         const assistantMessage: ConversationMessage = {
           id: crypto.randomUUID(),
           role: "assistant",
-          text: "界面已显示，但桌面端 API 未连接。请重启 npm run dev。",
+          text: "Linnea 桌面服务暂未连接，请重启应用。",
           createdAt: new Date().toISOString()
         };
         setMessages((current) => [...current, assistantMessage]);
