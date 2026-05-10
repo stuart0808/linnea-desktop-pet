@@ -8,6 +8,7 @@ import type { LocalPetMood } from "../utils/petHelpers";
 import { hasFileDrop, getDropItems, dedupeCodexItems } from "../utils/codexHelpers";
 import { PlanProposalCard } from "../components/chat/PlanProposalCard";
 import { CodexBasketPopover } from "../components/codex/CodexBasketPopover";
+import { useI18n } from "../i18n";
 
 function LinneaPet({ state, images, showAlert }: { state: ReturnType<typeof getPetVisualState>; images: Record<ReturnType<typeof getPetVisualState>, string>; showAlert: boolean }) {
   return (
@@ -19,6 +20,7 @@ function LinneaPet({ state, images, showAlert }: { state: ReturnType<typeof getP
 }
 
 export function PetWindow() {
+  const { t } = useI18n();
   const api: DesktopPetApi | undefined = window.desktopPet;
   const [messages, setMessages] = React.useState<ConversationMessage[]>([]);
   const [todos, setTodos] = React.useState<TodoItem[]>([]);
@@ -26,7 +28,7 @@ export function PetWindow() {
   const [input, setInput] = React.useState("");
   const [mood, setMood] = React.useState<LocalPetMood>("idle");
   const [chatOpen, setChatOpen] = React.useState(false);
-  const [bubble, setBubble] = React.useState("今天也一起把事情整理清楚。");
+  const [bubble, setBubble] = React.useState(t("今天也一起把事情整理清楚。"));
   const [busy, setBusy] = React.useState(false);
   const [pendingPlan, setPendingPlan] = React.useState<PlanProposal | null>(null);
   const [planBusy, setPlanBusy] = React.useState(false);
@@ -98,7 +100,7 @@ export function PetWindow() {
 
   React.useEffect(() => {
     if (!api) {
-      setBubble("Linnea 桌面服务暂未连接，请重启应用。");
+      setBubble(t("Linnea 桌面服务暂未连接，请重启应用。"));
       return;
     }
     void refreshSnapshot();
@@ -167,12 +169,12 @@ export function PetWindow() {
       setChatOpen(true);
       setMiniMessage(null);
       setMood("talking" as PetMood);
-      setBubble("要记录什么？直接告诉我。");
+      setBubble(t("要记录什么？直接告诉我。"));
       window.setTimeout(() => miniInputRef.current?.focus(), 80);
     });
   }, [api]);
 
-  async function sendText(text: string, placeholderText = "我在整理你刚刚说的内容...") {
+  async function sendText(text: string, placeholderText = t("我在整理你刚刚说的内容...")) {
     if (!text || busy) return;
     setBusy(true);
     setMiniMessage(null);
@@ -202,7 +204,7 @@ export function PetWindow() {
         const assistantMessage: ConversationMessage = {
           id: crypto.randomUUID(),
           role: "assistant",
-          text: "Linnea 桌面服务暂未连接，请重启应用。",
+          text: t("Linnea 桌面服务暂未连接，请重启应用。"),
           createdAt: new Date().toISOString()
         };
         setMessages((current) => [...current, assistantMessage]);
@@ -219,7 +221,7 @@ export function PetWindow() {
       setPendingPlan(null);
     } catch (error) {
       setMood("confused");
-      setBubble(error instanceof Error ? error.message : "对话失败，请稍后再试。");
+      setBubble(error instanceof Error ? error.message : t("对话失败，请稍后再试。"));
     } finally {
       setThinkingPlaceholder(null);
       setBusy(false);
@@ -244,12 +246,12 @@ export function PetWindow() {
       setTodos(await api.todo.list());
       setMessages(await api.chat.listMessages());
       setMood("happy" as PetMood);
-      setBubble(`已写入 ${saved.todos.length} 个待办。`);
+      setBubble(t("已写入 {count} 个待办。", { count: saved.todos.length }));
       setMiniMessage({ ...message, taskDraftStatus: "accepted" });
       scheduleMiniClose();
     } catch (error) {
       setMood("confused");
-      setBubble(error instanceof Error ? error.message : "写入计划失败，请稍后再试。");
+      setBubble(error instanceof Error ? error.message : t("写入计划失败，请稍后再试。"));
     } finally {
       setPlanBusy(false);
     }
@@ -263,7 +265,7 @@ export function PetWindow() {
       taskDraftStatus: "dismissed"
     });
     setMessages(await api.chat.listMessages());
-    setBubble("好的，这个草案已标记为未采纳。");
+    setBubble(t("好的，这个草案已标记为未采纳。"));
     setMiniMessage({ ...message, taskDraftStatus: "dismissed" });
     scheduleMiniClose();
   }
@@ -276,7 +278,7 @@ export function PetWindow() {
     setActiveReminder(null);
     setChatOpen(false);
     setMood("happy" as PetMood);
-    setBubble(`已完成：${activeReminder.title}`);
+    setBubble(t("已完成：{title}", { title: activeReminder.title }));
   }
 
   async function snoozeActiveReminder(minutes: number) {
@@ -286,7 +288,7 @@ export function PetWindow() {
     setActiveReminder(null);
     setChatOpen(false);
     setMood("idle");
-    setBubble(`${minutes} 分钟后再提醒你。`);
+    setBubble(t("{minutes} 分钟后再提醒你。", { minutes }));
   }
 
   function openActiveReminderTodo() {
@@ -376,7 +378,7 @@ export function PetWindow() {
     setMiniMessage(null);
     setCodexError("");
     setMood("talking" as PetMood);
-    setBubble(`已加入 ${items.length} 个项目，确认后再交给 Codex。`);
+    setBubble(t("已加入 {count} 个项目，确认后再交给 Codex。", { count: items.length }));
     markInteraction();
   }
 
@@ -392,10 +394,10 @@ export function PetWindow() {
       setCodexBasketOpen(false);
       setCodexItems([]);
       setMood("happy" as PetMood);
-      setBubble("Codex 会话已打开。");
+      setBubble(t("Codex 会话已打开。"));
     } catch (error) {
       setMood("confused");
-      setCodexError(error instanceof Error ? error.message : "启动 Codex 失败。");
+      setCodexError(error instanceof Error ? error.message : t("启动 Codex 失败。"));
     } finally {
       setCodexCreateBusy(false);
     }
@@ -414,7 +416,7 @@ export function PetWindow() {
         {codexDragActive && (
           <div className="codex-drop-overlay">
             <Paperclip size={18} />
-            <strong>松开加入 Codex 文件篮</strong>
+            <strong>{t("松开加入 Codex 文件篮")}</strong>
           </div>
         )}
         {codexBasketOpen && (
@@ -459,13 +461,13 @@ export function PetWindow() {
             {activeReminder?.todoId && (
               <div className="reminder-actions" aria-label="提醒操作">
                 <button type="button" onClick={() => void completeActiveReminder()}>
-                  <Check size={14} /> 完成
+                  <Check size={14} /> {t("完成")}
                 </button>
                 <button type="button" onClick={() => void snoozeActiveReminder(10)}>
-                  <Bell size={14} /> 10 分钟后
+                  <Bell size={14} /> {t("10 分钟后")}
                 </button>
                 <button type="button" onClick={openActiveReminderTodo}>
-                  <ListTodo size={14} /> 打开待办
+                  <ListTodo size={14} /> {t("打开待办")}
                 </button>
               </div>
             )}
@@ -481,9 +483,9 @@ export function PetWindow() {
                   ref={miniInputRef}
                   value={input}
                   onChange={(event) => setInput(event.target.value)}
-                  placeholder="和 Linnea 说话..."
+                  placeholder={t("和 Linnea 说话...")}
                 />
-                <button type="submit" disabled={busy} aria-label="发送">
+                <button type="submit" disabled={busy} aria-label={t("发送")}>
                   <Send size={16} />
                 </button>
               </form>
@@ -499,11 +501,11 @@ export function PetWindow() {
           onPointerCancel={handlePetPointerUp}
           onClick={handlePetClick}
           onDoubleClick={handlePetDoubleClick}
-          aria-label="单击对话，打开 Linnea 主窗口，拖动移动位置"
+          aria-label={t("单击对话，打开 Linnea 主窗口，拖动移动位置")}
         >
           <LinneaPet state={visualState} images={currentPetImages} showAlert={hasOverdueOpenTodo} />
         </button>
-        {!api && <div className="debug-banner">Linnea 桌面服务暂未连接。</div>}
+        {!api && <div className="debug-banner">{t("Linnea 桌面服务暂未连接。")}</div>}
       </section>
     </main>
   );

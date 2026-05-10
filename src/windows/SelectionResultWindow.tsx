@@ -1,5 +1,6 @@
 import React from "react";
 import type { DesktopPetApi, SelectionTextResult } from "../../shared/types";
+import { useI18n } from "../i18n";
 
 const translationLanguageOptions = [
   { value: "auto", label: "自动" },
@@ -85,16 +86,17 @@ export function SelectionResultWindow({
   resultId: string;
   themeStyle: React.CSSProperties;
 }) {
+  const { t, locale } = useI18n();
   const [result, setResult] = React.useState<SelectionTextResult | null>(null);
   const [error, setError] = React.useState("");
 
   React.useEffect(() => {
     if (!api) {
-      setError("Linnea 桌面服务暂未连接。");
+      setError(t("Linnea 桌面服务暂未连接。"));
       return;
     }
     if (!resultId) {
-      setError("结果 ID 缺失。");
+      setError(t("结果 ID 缺失。"));
       return;
     }
     let disposed = false;
@@ -104,17 +106,17 @@ export function SelectionResultWindow({
         const value = await api.selection.getResult(resultId);
         if (disposed) return;
         if (!value) {
-          setError("没有找到这次处理结果。");
+          setError(t("没有找到这次处理结果。"));
           return;
         }
         setResult(value);
         if (value.status === "pending") {
           timer = window.setTimeout(load, 500);
         } else if (value.status === "error") {
-          setError(value.error ?? "处理失败。");
+          setError(value.error ?? t("处理失败。"));
         }
       } catch (reason) {
-        if (!disposed) setError(reason instanceof Error ? reason.message : "读取结果失败。");
+        if (!disposed) setError(reason instanceof Error ? reason.message : t("读取结果失败。"));
       }
     };
     void load();
@@ -130,14 +132,14 @@ export function SelectionResultWindow({
       void api.selection.getResult(resultId).then((value) => {
         if (value) {
           setResult(value);
-          if (value.status === "error") setError(value.error ?? "处理失败。");
+          if (value.status === "error") setError(value.error ?? t("处理失败。"));
         }
       });
     }, 500);
     return () => window.clearInterval(timer);
   }, [api, result?.status, resultId]);
 
-  const loadingText = result?.action === "translate" ? "正在翻译中..." : result?.action === "summarize" ? "正在总结中..." : "正在加载结果...";
+  const loadingText = result?.action === "translate" ? t("正在翻译中...") : result?.action === "summarize" ? t("正在总结中...") : t("正在加载结果...");
 
   async function changeTargetLanguage(targetLanguage: string) {
     if (!api || !result || result.action !== "translate" || result.status === "pending") return;
@@ -156,20 +158,20 @@ export function SelectionResultWindow({
           <strong>{result?.title ?? "Linnea"}</strong>
           {result?.action === "translate" && (
             <label className="translation-target">
-              <span>目标语言</span>
+              <span>{t("目标语言")}</span>
               <select
                 value={result.targetLanguage ?? "auto"}
                 disabled={result.status === "pending"}
                 onChange={(event) => void changeTargetLanguage(event.target.value)}
               >
                 {translationLanguageOptions.map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
+                  <option key={option.value} value={option.value}>{t(option.label)}</option>
                 ))}
               </select>
             </label>
           )}
         </div>
-        {result && <span>{new Date(result.createdAt).toLocaleString()}</span>}
+        {result && <span>{new Date(result.createdAt).toLocaleString(locale)}</span>}
       </header>
       <section className="selection-result-body">
         {error ? (

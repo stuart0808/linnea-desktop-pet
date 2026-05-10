@@ -3,6 +3,7 @@ import { Bug, Check, ChevronDown, ChevronUp, ClipboardCopy, FileCode, ListChecks
 import type { CodexModelSummary, CodexThreadSettings, CodexThreadSummary, CodexUiActivity } from "../../../shared/types";
 import type { CodexInputSuggestion } from "../../utils/codexHelpers";
 import { getCodexModelLabel, pathBasename, resolveCodexDisplayPath, stripAnsi } from "../../utils/codexHelpers";
+import { useI18n } from "../../i18n";
 
 const CHANGE_TYPE_LABELS: Record<string, string> = { add: "新增", delete: "删除", create: "新增", remove: "删除", update: "修改" };
 
@@ -26,6 +27,7 @@ export function FileChangesView({ text, workspacePath, onOpenPath }: {
   workspacePath: string;
   onOpenPath: (path: string) => void;
 }) {
+  const { t } = useI18n();
   const changes = React.useMemo(() => {
     try {
       const parsed: unknown = JSON.parse(text);
@@ -34,7 +36,7 @@ export function FileChangesView({ text, workspacePath, onOpenPath }: {
   }, [text]);
 
   if (!changes) return <pre className="codex-activity-pre">{text}</pre>;
-  if (changes.length === 0) return <span className="codex-activity-empty">无文件变更</span>;
+  if (changes.length === 0) return <span className="codex-activity-empty">{t("无文件变更")}</span>;
 
   return (
     <div className="codex-file-changes">
@@ -43,7 +45,7 @@ export function FileChangesView({ text, workspacePath, onOpenPath }: {
         const patch = typeof change.patch === "string" ? change.patch : null;
         const changeType = typeof change.type === "string" ? change.type : "update";
         const absPath = relPath ? resolveCodexDisplayPath(relPath, workspacePath) : null;
-        const label = CHANGE_TYPE_LABELS[changeType] ?? "修改";
+        const label = t(CHANGE_TYPE_LABELS[changeType] ?? "修改");
         return (
           <div key={i} className="codex-file-change">
             {relPath ? (
@@ -85,12 +87,12 @@ export function ActivityItemContent({ item, workspacePath, onOpenPath }: {
   return <pre className="codex-activity-pre">{item.text}</pre>;
 }
 
-function getActivityTypeLabel(type: string) {
-  if (type === "command") return "命令";
-  if (type === "file") return "文件";
-  if (type === "plan") return "计划";
-  if (type === "reasoning") return "推理";
-  return type || "活动";
+function getActivityTypeLabel(type: string, t: (text: string) => string) {
+  if (type === "command") return t("命令");
+  if (type === "file") return t("文件");
+  if (type === "plan") return t("计划");
+  if (type === "reasoning") return t("推理");
+  return type || t("活动");
 }
 
 function getActivityIcon(type: string) {
@@ -150,6 +152,7 @@ export function CodexActivityDrawer({
   onOpenPath: (path: string) => void;
   onClearRawEvents: () => void;
 }) {
+  const { t } = useI18n();
   const drawerRef = React.useRef<HTMLElement | null>(null);
   const [open, setOpen] = React.useState(false);
   const [tab, setTab] = React.useState<"activity" | "debug">("activity");
@@ -181,23 +184,23 @@ export function CodexActivityDrawer({
       <div className="codex-activity-drawer-bar">
         <button type="button" className="codex-activity-drawer-toggle" onClick={() => setOpen((current) => !current)}>
           {open ? <ChevronDown size={15} /> : <ChevronUp size={15} />}
-          <span>运行详情</span>
+          <span>{t("运行详情")}</span>
         </button>
       </div>
       {open && (
         <div className="codex-activity-drawer-panel">
           <div className="codex-activity-drawer-tabs">
             <button type="button" className={tab === "activity" ? "active" : ""} onClick={() => setTab("activity")}>
-              活动 {activity.length}
+              {t("活动")} {activity.length}
             </button>
             <button type="button" className={tab === "debug" ? "active" : ""} onClick={() => setTab("debug")}>
-              调试 {rawEvents.length}
+              {t("调试")} {rawEvents.length}
             </button>
           </div>
           {tab === "activity" ? (
             <div className="codex-activity-drawer-content">
               {activity.length === 0 ? (
-                <span className="codex-activity-empty">暂无命令或文件活动。</span>
+                <span className="codex-activity-empty">{t("暂无命令或文件活动。")}</span>
               ) : activity.map((item) => {
                 const expanded = expandedActivityIds[item.id] === true;
                 const statusKind = item.status ? getActivityStatusKind(item.status) : undefined;
@@ -207,7 +210,7 @@ export function CodexActivityDrawer({
                       <span className="codex-activity-row-icon">{getActivityIcon(item.type)}</span>
                       <span className="codex-activity-row-main">
                         <strong>{item.title}</strong>
-                        <span>{getActivityTypeLabel(item.type)} · {getActivitySummary(item)}</span>
+                        <span>{getActivityTypeLabel(item.type, t)} · {t(getActivitySummary(item))}</span>
                       </span>
                       {item.status && (
                         <span className="codex-activity-status" data-status-kind={statusKind}>
@@ -229,11 +232,11 @@ export function CodexActivityDrawer({
           ) : (
             <div className="codex-activity-drawer-content">
               <div className="codex-debug-toolbar">
-                <span>最近 {rawItems.length} 条事件</span>
-                <button type="button" onClick={onClearRawEvents} disabled={!rawEvents.length}>清空</button>
+                <span>{t("最近 {count} 条事件", { count: rawItems.length })}</span>
+                <button type="button" onClick={onClearRawEvents} disabled={!rawEvents.length}>{t("清空")}</button>
               </div>
               {rawItems.length === 0 ? (
-                <span className="codex-activity-empty">暂无调试事件。</span>
+                <span className="codex-activity-empty">{t("暂无调试事件。")}</span>
               ) : rawItems.map((item, index) => {
                 const expanded = expandedRawIndexes[index] === true;
                 return (
@@ -247,7 +250,7 @@ export function CodexActivityDrawer({
                     {expanded && (
                       <div className="codex-debug-event-detail">
                         <button type="button" onClick={() => void copyRawEvent(item.formatted)}>
-                          <ClipboardCopy size={13} /> 复制 JSON
+                          <ClipboardCopy size={13} /> {t("复制 JSON")}
                         </button>
                         <pre>{item.formatted}</pre>
                       </div>
@@ -264,22 +267,24 @@ export function CodexActivityDrawer({
 }
 
 export function CodexThinkingMessage() {
+  const { t } = useI18n();
   return (
     <div className="codex-chat-message assistant codex-thinking-message">
       <span className="typing-dots" aria-hidden="true"><i></i><i></i><i></i></span>
-      <span>Codex 正在输出...</span>
+      <span>{t("Codex 正在输出...")}</span>
     </div>
   );
 }
 
 export function CodexThreadBadges({ settings, models }: { settings: CodexThreadSettings; models: CodexModelSummary[] }) {
+  const { t } = useI18n();
   const model = settings.model;
-  const modelLabel = model ? getCodexModelLabel(model, models) : "默认模型";
+  const modelLabel = model ? getCodexModelLabel(model, models) : t("默认模型");
   return (
     <div className="codex-thread-badges">
       <span>{modelLabel}</span>
       {settings.reasoningEffort && <span>{settings.reasoningEffort}</span>}
-      <span>{settings.mode === "plan" ? "计划模式" : "默认模式"}</span>
+      <span>{settings.mode === "plan" ? t("计划模式") : t("默认模式")}</span>
     </div>
   );
 }
@@ -295,12 +300,13 @@ export function CodexSuggestionPicker({
   onHover(index: number): void;
   onApply(suggestion: CodexInputSuggestion): void;
 }) {
+  const { t } = useI18n();
   return (
     <div className="codex-suggestions">
       <div className="codex-suggestions-header">
         <div>
-          <strong>指令补全</strong>
-          <span>{suggestions.length} 个匹配项，使用 ↑ ↓ 选择，Tab 或 Enter 补全。</span>
+          <strong>{t("指令补全")}</strong>
+          <span>{t("{count} 个匹配项，使用 ↑ ↓ 选择，Tab 或 Enter 补全。", { count: suggestions.length })}</span>
         </div>
       </div>
       <div className="codex-suggestions-list">
@@ -321,8 +327,8 @@ export function CodexSuggestionPicker({
         ))}
       </div>
       <div className="codex-suggestions-footer">
-        <span>Esc 关闭</span>
-        <span>Tab / Enter 补全</span>
+        <span>{t("Esc 关闭")}</span>
+        <span>{t("Tab / Enter 补全")}</span>
       </div>
     </div>
   );
@@ -343,21 +349,22 @@ export function CodexResumePicker({
   onResume(threadId: string): void;
   onClose(): void;
 }) {
+  const { t, locale } = useI18n();
   return (
     <div className="codex-resume-picker">
       <div className="codex-resume-picker-header">
         <div>
-          <strong>恢复 Codex 线程</strong>
-          <span>{threads.length} 个可恢复线程，使用 ↑ ↓ 选择，Enter 恢复。</span>
+          <strong>{t("恢复 Codex 线程")}</strong>
+          <span>{t("{count} 个可恢复线程，使用 ↑ ↓ 选择，Enter 恢复。", { count: threads.length })}</span>
         </div>
-        <button type="button" onClick={onClose} aria-label="关闭恢复列表">
+        <button type="button" onClick={onClose} aria-label={t("关闭恢复列表")}>
           <X size={13} />
         </button>
       </div>
       <div className="codex-resume-picker-list">
         {threads.map((thread, index) => {
           const title = thread.name || thread.preview || thread.id;
-          const updatedAt = new Date((thread.updatedAt || thread.createdAt) * 1000).toLocaleString();
+          const updatedAt = new Date((thread.updatedAt || thread.createdAt) * 1000).toLocaleString(locale);
           return (
             <button
               key={thread.id}
@@ -381,8 +388,8 @@ export function CodexResumePicker({
         })}
       </div>
       <div className="codex-resume-picker-footer">
-        <span>Esc 关闭</span>
-        <span>{busy ? "正在恢复..." : "点击任意线程继续"}</span>
+        <span>{t("Esc 关闭")}</span>
+        <span>{busy ? t("正在恢复...") : t("点击任意线程继续")}</span>
       </div>
     </div>
   );

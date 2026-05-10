@@ -3,6 +3,7 @@ import { Bell, FolderOpen, Image as ImageIcon, KeyRound, RotateCcw, Settings, Sp
 import type { AppSettings, CodexApprovalPolicy, CodexSandboxPolicy, DesktopPetApi } from "../../../shared/types";
 import { aiProviderPresets, workspaceThemePresets } from "../../utils/constants";
 import { getCodexApprovalLabel, getCodexSandboxLabel } from "../../utils/codexHelpers";
+import { useI18n } from "../../i18n";
 import { Toggle } from "./Toggle";
 
 export function SettingsPanel({
@@ -22,6 +23,7 @@ export function SettingsPanel({
   onTestReminder(): Promise<void>;
   api?: DesktopPetApi;
 }) {
+  const { t, languageOptions } = useI18n();
   const [apiKey, setApiKey] = React.useState(settings.aiApiKey ?? settings.openAiApiKey ?? "");
   const [aiProviderName, setAiProviderName] = React.useState(settings.aiProviderName ?? aiProviderPresets[settings.aiProvider].label);
   const [aiBaseUrl, setAiBaseUrl] = React.useState(settings.aiBaseUrl ?? aiProviderPresets[settings.aiProvider].baseUrl);
@@ -102,7 +104,7 @@ export function SettingsPanel({
     } catch (error) {
       setApiTestResult({
         ok: false,
-        message: error instanceof Error ? error.message : "连接测试失败。"
+        message: error instanceof Error ? error.message : t("连接测试失败。")
       });
     } finally {
       setApiTestBusy(false);
@@ -126,17 +128,17 @@ export function SettingsPanel({
     try {
       const result = await api.codex.clearCache();
       const freed = formatBytes(result.freedBytes);
-      const skipped = result.skippedCount ? `；跳过 ${result.skippedCount} 个运行中会话` : "";
+      const skipped = result.skippedCount ? t("；跳过 {count} 个运行中会话", { count: result.skippedCount }) : "";
       setCodexCacheResult({
         ok: true,
         message: result.deletedCount
-          ? `已清理 ${result.deletedCount} 个临时会话，释放 ${freed}${skipped}`
-          : `没有可清理的 Codex 缓存${skipped}`
+          ? t("已清理 {count} 个临时会话，释放 {size}{skipped}", { count: result.deletedCount, size: freed, skipped })
+          : t("没有可清理的 Codex 缓存{skipped}", { skipped })
       });
     } catch (error) {
       setCodexCacheResult({
         ok: false,
-        message: error instanceof Error ? error.message : "清理 Codex 缓存失败。"
+        message: error instanceof Error ? error.message : t("清理 Codex 缓存失败。")
       });
     } finally {
       setCodexCacheBusy(false);
@@ -159,8 +161,8 @@ export function SettingsPanel({
     <section className="settings">
       <div className="settings-overview">
         <div>
-          <strong>设置</strong>
-          <span>调整 Linnea 主窗口、模型服务和桌宠行为。</span>
+          <strong>{t("设置")}</strong>
+          <span>{t("调整 Linnea 主窗口、模型服务和桌宠行为。")}</span>
         </div>
         <div className="settings-status">
           <span>{settings.aiProviderName ?? aiProviderPresets[settings.aiProvider].label}</span>
@@ -169,28 +171,28 @@ export function SettingsPanel({
       </div>
 
       <div className="settings-grid">
-        <section className="settings-section ai-setting" aria-label="模型服务设置">
+        <section className="settings-section ai-setting" aria-label={t("模型服务")}>
           <div className="settings-section-header">
             <div className="setting-icon"><Sparkles size={15} /></div>
             <div>
-              <strong>模型服务</strong>
-              <span>配置对话和待办识别使用的模型服务。</span>
+              <strong>{t("模型服务")}</strong>
+              <span>{t("配置对话和待办识别使用的模型服务。")}</span>
             </div>
           </div>
           <label>
-            提供商
+            {t("提供商")}
             <select
               value={settings.aiProvider}
               onChange={(event) => changeAiProvider(event.target.value as AppSettings["aiProvider"])}
             >
               <option value="deepseek">DeepSeek</option>
               <option value="openai">OpenAI</option>
-              <option value="custom">自定义提供商</option>
+              <option value="custom">{t("自定义提供商")}</option>
             </select>
           </label>
           {settings.aiProvider === "custom" && (
             <label>
-              提供商名称
+              {t("提供商名称")}
               <input
                 value={aiProviderName}
                 onChange={(event) => setAiProviderName(event.target.value)}
@@ -201,7 +203,7 @@ export function SettingsPanel({
           )}
           <div className="settings-two-column">
             <label>
-              服务地址
+              {t("服务地址")}
               <input
                 value={aiBaseUrl}
                 onChange={(event) => setAiBaseUrl(event.target.value)}
@@ -210,7 +212,7 @@ export function SettingsPanel({
               />
             </label>
             <label>
-              模型
+              {t("模型")}
               <input
                 value={aiModel}
                 onChange={(event) => setAiModel(event.target.value)}
@@ -220,17 +222,17 @@ export function SettingsPanel({
             </label>
           </div>
           <label>
-            访问密钥
+            {t("访问密钥")}
             <input
               value={apiKey}
               onChange={(event) => setApiKey(event.target.value)}
               onBlur={() => persistAiConfig({ aiApiKey: apiKey || undefined, openAiApiKey: apiKey || undefined })}
-              placeholder="填写模型服务提供的访问密钥"
+              placeholder={t("填写模型服务提供的访问密钥")}
             />
           </label>
           <div className="settings-inline-actions">
             <button className="settings-action primary" onClick={() => void testApi()} disabled={apiTestBusy}>
-              <Sparkles size={15} /> {apiTestBusy ? "测试中..." : "测试连接"}
+              <Sparkles size={15} /> {apiTestBusy ? t("测试中...") : t("测试连接")}
             </button>
             {apiTestResult && (
               <div className={`api-test-result ${apiTestResult.ok ? "ok" : "error"}`}>
@@ -240,16 +242,16 @@ export function SettingsPanel({
           </div>
         </section>
 
-        <section className="settings-section codex-setting" aria-label="Codex 设置">
+        <section className="settings-section codex-setting" aria-label={t("Codex")}>
           <div className="settings-section-header">
             <div className="setting-icon"><Sparkles size={15} /></div>
             <div>
               <strong>Codex</strong>
-              <span>设置 Linnea 主窗口中 Codex 面板的默认启动方式。</span>
+              <span>{t("设置 Linnea 主窗口中 Codex 面板的默认启动方式。")}</span>
             </div>
           </div>
           <label>
-            启动命令
+            {t("启动命令")}
             <input
               value={codexExecutable}
               onChange={(event) => setCodexExecutable(event.target.value)}
@@ -259,31 +261,31 @@ export function SettingsPanel({
           </label>
           <div className="settings-two-column">
             <label>
-              默认权限范围
+              {t("默认权限范围")}
               <select
                 value={settings.codexDefaultSandbox}
                 onChange={(event) => onChange({ codexDefaultSandbox: event.target.value as CodexSandboxPolicy })}
               >
-                <option value="read-only">{getCodexSandboxLabel("read-only")}</option>
-                <option value="workspace-write">{getCodexSandboxLabel("workspace-write")}</option>
-                <option value="danger-full-access">{getCodexSandboxLabel("danger-full-access")}</option>
+                <option value="read-only">{t(getCodexSandboxLabel("read-only"))}</option>
+                <option value="workspace-write">{t(getCodexSandboxLabel("workspace-write"))}</option>
+                <option value="danger-full-access">{t(getCodexSandboxLabel("danger-full-access"))}</option>
               </select>
             </label>
             <label>
-              默认执行前确认
+              {t("默认执行前确认")}
               <select
                 value={settings.codexDefaultApproval}
                 onChange={(event) => onChange({ codexDefaultApproval: event.target.value as CodexApprovalPolicy })}
               >
-                <option value="on-request">{getCodexApprovalLabel("on-request")}</option>
-                <option value="never">{getCodexApprovalLabel("never")}</option>
+                <option value="on-request">{t(getCodexApprovalLabel("on-request"))}</option>
+                <option value="never">{t(getCodexApprovalLabel("never"))}</option>
               </select>
             </label>
           </div>
-          <div className="setting-hint">保持默认即可使用 Codex；拖拽文件会先复制到隔离工作目录。</div>
+          <div className="setting-hint">{t("保持默认即可使用 Codex；拖拽文件会先复制到隔离工作目录。")}</div>
           <div className="settings-inline-actions">
             <button className="settings-action danger" onClick={() => void clearCodexCache()} disabled={codexCacheBusy}>
-              <Trash2 size={15} /> {codexCacheBusy ? "清理中..." : "清除缓存"}
+              <Trash2 size={15} /> {codexCacheBusy ? t("清理中...") : t("清除缓存")}
             </button>
             {codexCacheResult && (
               <div className={`api-test-result ${codexCacheResult.ok ? "ok" : "error"}`}>
@@ -293,16 +295,16 @@ export function SettingsPanel({
           </div>
         </section>
 
-        <section className="settings-section shortcut-setting" aria-label="快捷键设置">
+        <section className="settings-section shortcut-setting" aria-label={t("快捷键")}>
           <div className="settings-section-header">
             <div className="setting-icon"><KeyRound size={15} /></div>
             <div>
-              <strong>快捷键</strong>
-              <span>快速唤出桌宠气泡，直接记录想法和任务。</span>
+              <strong>{t("快捷键")}</strong>
+              <span>{t("快速唤出桌宠气泡，直接记录想法和任务。")}</span>
             </div>
           </div>
           <label>
-            快速 AI 记录
+            {t("快速 AI 记录")}
             <input
               value={quickAiRecordShortcut}
               onChange={(event) => setQuickAiRecordShortcut(event.target.value)}
@@ -310,15 +312,33 @@ export function SettingsPanel({
               placeholder="CommandOrControl+Shift+Space"
             />
           </label>
-          <div className="setting-hint">格式示例：CommandOrControl+Shift+Space。</div>
+          <div className="setting-hint">{t("格式示例：CommandOrControl+Shift+Space。")}</div>
         </section>
 
-        <section className="settings-section theme-setting" aria-label="Linnea 主窗口主题颜色">
+        <section className="settings-section theme-setting" aria-label={t("语言")}>
           <div className="settings-section-header">
             <div className="setting-icon"><Settings size={15} /></div>
             <div>
-              <strong>Linnea 主窗口主题颜色</strong>
-              <span>同步工作台、提醒气泡和分区强调色。</span>
+              <strong>{t("语言")}</strong>
+              <span>{t("跟随系统")}</span>
+            </div>
+          </div>
+          <label>
+            {t("语言")}
+            <select value={settings.language} onChange={(event) => onChange({ language: event.target.value as AppSettings["language"] })}>
+              {languageOptions.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </label>
+        </section>
+
+        <section className="settings-section theme-setting" aria-label={t("Linnea 主窗口主题颜色")}>
+          <div className="settings-section-header">
+            <div className="setting-icon"><Settings size={15} /></div>
+            <div>
+              <strong>{t("Linnea 主窗口主题颜色")}</strong>
+              <span>{t("同步工作台、提醒气泡和分区强调色。")}</span>
             </div>
           </div>
           <div className="theme-swatches">
@@ -329,66 +349,66 @@ export function SettingsPanel({
                 className={`theme-swatch ${settings.workspaceThemeColor.toLowerCase() === color.toLowerCase() ? "active" : ""}`}
                 style={{ backgroundColor: color }}
                 onClick={() => updateThemeColor(color)}
-                aria-label={`使用主题色 ${color}`}
+                aria-label={t("使用主题色 {color}", { color })}
               />
             ))}
-            <label className="theme-picker" aria-label="自定义主题颜色">
+            <label className="theme-picker" aria-label={t("自定义主题颜色")}>
               <input type="color" value={themeColor} onChange={(event) => updateThemeColor(event.target.value)} />
             </label>
           </div>
         </section>
 
-        <section className="settings-section appearance-setting" aria-label="更换桌宠形象">
+        <section className="settings-section appearance-setting" aria-label={t("桌宠形象")}>
           <div className="settings-section-header">
             <div className="setting-icon"><ImageIcon size={15} /></div>
             <div>
-              <strong>桌宠形象</strong>
-              <span>替换完整状态图组，保持所有情绪状态可用。</span>
+              <strong>{t("桌宠形象")}</strong>
+              <span>{t("替换完整状态图组，保持所有情绪状态可用。")}</span>
             </div>
           </div>
           <div className="appearance-current">
-            <strong>{settings.petAppearance?.name ?? "默认 Linnea"}</strong>
-            <span>{settings.petAppearance?.directory ?? "使用内置状态图片"}</span>
+            <strong>{settings.petAppearance?.name ?? t("默认 Linnea")}</strong>
+            <span>{settings.petAppearance?.directory ?? t("使用内置状态图片")}</span>
           </div>
           <div className="appearance-actions">
             <button className="settings-action" onClick={onSelectPetAppearance}>
-              <FolderOpen size={15} /> 选择形象文件夹
+              <FolderOpen size={15} /> {t("选择形象文件夹")}
             </button>
             {settings.petAppearance && (
               <button className="settings-action" onClick={onResetPetAppearance}>
-                <RotateCcw size={15} /> 恢复默认
+                <RotateCcw size={15} /> {t("恢复默认")}
               </button>
             )}
           </div>
-          <div className="setting-hint">文件夹名需为 {"{角色名}_state"}，图片文件名如 _Idle_.png、_Talking_.png。</div>
+          <div className="setting-hint">{t("文件夹名需为 {name}_state，图片文件名如 _Idle_.png、_Talking_.png。", { name: "{角色名}" })}</div>
         </section>
 
-        <section className="settings-section behavior-setting" aria-label="行为设置">
+        <section className="settings-section behavior-setting" aria-label={t("桌宠行为")}>
           <div className="settings-section-header">
             <div className="setting-icon"><Bell size={15} /></div>
             <div>
-              <strong>桌宠行为</strong>
-              <span>控制全局浮窗、系统提醒和窗口层级。</span>
+              <strong>{t("桌宠行为")}</strong>
+              <span>{t("控制全局浮窗、系统提醒和窗口层级。")}</span>
             </div>
           </div>
           <div className="toggle-list">
-            <Toggle label="浮窗工具" checked={settings.selectionToolsEnabled} onChange={(value) => onChange({ selectionToolsEnabled: value })} />
-            <Toggle label="系统通知" checked={settings.systemNotifications} onChange={(value) => onChange({ systemNotifications: value })} />
-            <Toggle label="始终置顶" checked={settings.alwaysOnTop} onChange={(value) => onChange({ alwaysOnTop: value })} />
+            <Toggle label={t("浮窗工具")} checked={settings.selectionToolsEnabled} onChange={(value) => onChange({ selectionToolsEnabled: value })} />
+            <Toggle label={t("系统通知")} checked={settings.systemNotifications} onChange={(value) => onChange({ systemNotifications: value })} />
+            <Toggle label={t("始终置顶")} checked={settings.alwaysOnTop} onChange={(value) => onChange({ alwaysOnTop: value })} />
           </div>
-          <div className="settings-note">AI 识别到的任务会先生成草案，确认后才保存。</div>
+          <div className="settings-note">{t("AI 识别到的任务会先生成草案，确认后才保存。")}</div>
         </section>
       </div>
 
       <div className="settings-footer">
         <button className="settings-action danger" onClick={onClearMessages}>
-          <Trash2 size={15} /> 清除对话记录
+          <Trash2 size={15} /> {t("清除对话记录")}
         </button>
         <button className="settings-action" onClick={() => void onTestReminder()}>
-          <Bell size={15} /> 测试 Windows 提醒
+          <Bell size={15} /> {t("测试 Windows 提醒")}
         </button>
         <button className="settings-action" onClick={() => void checkForUpdates()} disabled={updateCheckBusy}>
-          <RotateCcw size={15} /> {updateCheckBusy ? "检查中..." : "检查更新"}
+          <RotateCcw size={15} /> {updateCheckBusy ? t("检查中...") : t("检查更新")}
         </button>
       </div>
     </section>

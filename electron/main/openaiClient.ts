@@ -1,18 +1,20 @@
 import OpenAI from "openai";
-import type { ModelStructuredResult, SelectionTextAction, TodoPriority } from "../../shared/types.js";
+import type { AppLocale, ModelStructuredResult, SelectionTextAction, TodoPriority } from "../../shared/types.js";
+import { translate } from "../../shared/i18n.js";
 
 interface AiClientConfig {
   apiKey?: string;
   baseURL?: string;
   model: string;
   providerName?: string;
+  locale?: AppLocale;
 }
 
-const fallbackResult = (text: string): ModelStructuredResult => ({
-  replyText: "我先整理成任务草案，确认后再保存。当前没有配置模型服务访问密钥，所以只使用本地规则做基础抽取。",
+const fallbackResult = (text: string, locale: AppLocale): ModelStructuredResult => ({
+  replyText: translate(locale, "我先整理成任务草案，确认后再保存。当前没有配置模型服务访问密钥，所以只使用本地规则做基础抽取。"),
   mood: "thinking",
   taskIntent: "simple_todo",
-  todoCandidates: localTodoExtract(text)
+  todoCandidates: localTodoExtract(text, locale)
 });
 
 export async function askPetAssistant(params: {
@@ -24,8 +26,10 @@ export async function askPetAssistant(params: {
   nowIso: string;
   localTimeText: string;
   timeZone: string;
+  locale?: AppLocale;
 }): Promise<ModelStructuredResult> {
-  if (!params.apiKey) return fallbackResult(params.text);
+  const locale = params.locale ?? "zh-CN";
+  if (!params.apiKey) return fallbackResult(params.text, locale);
 
   const client = createAiClient(params);
 
@@ -34,8 +38,7 @@ export async function askPetAssistant(params: {
     messages: [
       {
         role: "system",
-        content:
-          "你是 Windows 桌面宠物助手 Linnea。用简短、自然、亲近但不夸张的中文回复。你还要判断用户消息的任务意图并抽取待办草案。必须只输出 JSON，不要输出 Markdown。JSON 字段只能为 replyText, mood, taskIntent, todoCandidates, planProposal。mood 只能是 idle/talking/happy/thinking/reminder。taskIntent 只能是 none/simple_todo/complex_goal。none 表示闲聊、情绪表达或没有明确行动；simple_todo 表示一个或多个可以直接列为待办的事项，例如提醒、开会、买东西、打电话、提交材料；complex_goal 表示需要多个步骤或阶段推进的目标，例如写完论文、备考、准备汇报、完成项目、整理作品集。todoCandidates 用于 simple_todo，每项必须包含 title, notes, project, tags, priority, dueAt, remindAt, repeatRule, subtasks, attachments, confidence；没有值用 null 或空数组。priority 只能是 low/medium/high/urgent，不确定用 medium。tags 是短标签数组；project 是所属项目；repeatRule 是自然语言重复规则，例如“每周五”，没有则 null；subtasks 是 {title, done} 数组；attachments 是附件名称或路径数组，用户没有明确提到则空数组。complex_goal 时不要把内容放入 todoCandidates，必须输出 planProposal：summary 是目标概述，sourceMessage 原样填写用户消息，needsConfirmation 为 true，items 为 3-6 个可执行步骤，每项字段同 todoCandidates，并给出合理时间节点。用户说“提醒我 X”“N 分钟后提醒我 X”“明天提醒我 X”时属于 simple_todo，必须创建 todoCandidates 项：title 是要做的事，remindAt 是提醒时间，dueAt 通常同 remindAt，notes 可写提醒说明。所有相对日期和口语时间都必须基于用户消息发送时的本地时间解析。输出 dueAt/remindAt 时必须使用带时区偏移的 ISO 8601，例如 2026-05-04T20:00:00+08:00；不要输出无时区时间，也不要把本地晚上 8 点当作 UTC 20:00。所有抽取结果只是草案，不能声称已经保存。"
+        content: buildAssistantSystemPrompt(locale)
       },
       {
         role: "user",
@@ -58,10 +61,12 @@ export async function summarizeRecentContext(params: {
   nowIso: string;
   localTimeText: string;
   timeZone: string;
+  locale?: AppLocale;
   messages: Array<{ role: string; text: string; createdAt: string }>;
   todos: Array<{ title: string; status: string; createdAt: string; dueAt?: string; remindAt?: string }>;
 }): Promise<string> {
   const now = new Date(params.nowIso);
+  const locale = params.locale ?? "zh-CN";
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
   const tomorrowStart = todayStart + 24 * 60 * 60_000;
   const openTodos = params.todos.filter((todo) => todo.status !== "done");
@@ -87,8 +92,8 @@ export async function summarizeRecentContext(params: {
     .slice(-12);
   if (!params.apiKey) {
     return todayTodos.length
-      ? `当前没有配置模型服务访问密钥。根据本地数据，今天需要处理：${todayTodos.slice(0, 6).map((todo) => todo.title).join("；")}。建议先处理已过期或有明确提醒时间的事项，再整理剩余任务。`
-      : "当前没有配置模型服务访问密钥。根据本地数据，今天没有明确待完成事项。建议检查是否有遗漏任务，并保留一段时间处理临时事项。";
+      ? translate(locale, "当前没有配置模型服务访问密钥。根据本地数据，今天需要处理：{items}。建议先处理已过期或有明确提醒时间的事项，再整理剩余任务。", { items: todayTodos.slice(0, 6).map((todo) => todo.title).join("；") })
+      : translate(locale, "当前没有配置模型服务访问密钥。根据本地数据，今天没有明确待完成事项。建议检查是否有遗漏任务，并保留一段时间处理临时事项。");
   }
 
   const client = createAiClient(params);
@@ -98,8 +103,7 @@ export async function summarizeRecentContext(params: {
     messages: [
       {
         role: "system",
-        content:
-          "你是 Windows 桌面宠物助手 Linnea 的今日总结模块。今日总结必须以待办数据为主：今天仍需完成的待办、已过期事项和今天接下来提醒是唯一主要依据。对话内容只能作为附加参考，用来理解语境或补充措辞，不能替代待办，也不要展示对话内容。不要生成新的待办，不要输出 Markdown 标题。生成一段简洁中文总结和行动建议，结构可以自然包含：今天重点、优先处理、行动建议。控制在 120-180 字。"
+        content: buildSummarySystemPrompt(locale)
       },
       {
         role: "user",
@@ -116,7 +120,7 @@ export async function summarizeRecentContext(params: {
     ]
   });
 
-  return response.choices[0]?.message?.content?.trim() || "暂时没有足够内容可以总结。";
+  return response.choices[0]?.message?.content?.trim() || translate(locale, "暂时没有足够内容可以总结。");
 }
 
 export async function testAiConnection(params: {
@@ -124,9 +128,11 @@ export async function testAiConnection(params: {
   baseURL?: string;
   model: string;
   providerName?: string;
+  locale?: AppLocale;
 }): Promise<string> {
+  const locale = params.locale ?? "zh-CN";
   if (!params.apiKey?.trim()) {
-    throw new Error(`请先填写 ${params.providerName ?? "模型服务"} 访问密钥，或配置对应环境变量。`);
+    throw new Error(translate(locale, "请先填写 {provider} 访问密钥，或配置对应环境变量。", { provider: params.providerName ?? translate(locale, "模型服务") }));
   }
 
   const client = createAiClient(params);
@@ -134,15 +140,15 @@ export async function testAiConnection(params: {
   const response = await client.chat.completions.create({
     model: params.model,
     messages: [
-      { role: "system", content: "你是 API 连通性测试模块。请回复 OK。" },
-      { role: "user", content: "请回复 OK" }
+      { role: "system", content: buildConnectionTestPrompt(locale) },
+      { role: "user", content: "OK" }
     ],
     max_tokens: 16,
     temperature: 0
   });
 
   const text = response.choices[0]?.message?.content?.trim();
-  if (!Array.isArray(response.choices)) throw new Error(`${params.providerName ?? "模型服务"} 返回结构异常。`);
+  if (!Array.isArray(response.choices)) throw new Error(translate(locale, "{provider} 返回结构异常。", { provider: params.providerName ?? translate(locale, "模型服务") }));
   return text || "OK";
 }
 
@@ -154,21 +160,23 @@ export async function processSelectedText(params: {
   action: SelectionTextAction;
   text: string;
   targetLanguage?: string;
+  locale?: AppLocale;
 }): Promise<string> {
   const trimmed = params.text.trim();
+  const locale = params.locale ?? "zh-CN";
   if (!trimmed) return "";
   if (!params.apiKey) {
     return params.action === "translate"
-      ? `当前没有配置模型服务访问密钥。\n\n${trimmed}`
-      : `当前没有配置模型服务访问密钥。\n\n- 已选中文字共 ${trimmed.length} 个字符。\n- 请配置访问密钥后使用智能总结。`;
+      ? `${translate(locale, "当前没有配置模型服务访问密钥。")}\n\n${trimmed}`
+      : `${translate(locale, "当前没有配置模型服务访问密钥。")}\n\n- ${translate(locale, "已选中文字共 {count} 个字符。", { count: trimmed.length })}\n- ${translate(locale, "请配置访问密钥后使用智能总结。")}`;
   }
 
   const client = createAiClient(params);
 
   const targetLanguage = normalizeTargetLanguage(params.targetLanguage);
   const systemPrompt = params.action === "translate"
-    ? `你是 Linnea 的选中文本翻译模块。只输出 Markdown 正文，不要输出标题以外的解释，不要复述用户原文。翻译目标语言：${targetLanguage}。如果目标语言是“自动”，则原文主要为中文时翻译为英文，原文主要为其他语言时翻译为中文。保留必要的列表、代码和术语。`
-    : "你是 Linnea 的选中文本总结模块。只输出 Markdown 正文，不要复述用户原文。用简洁中文总结关键信息、结论和行动点。适合时使用短列表。";
+    ? buildSelectionTranslatePrompt(locale, targetLanguage)
+    : buildSelectionSummaryPrompt(locale);
 
   const response = await client.chat.completions.create({
     model: params.model,
@@ -178,7 +186,34 @@ export async function processSelectedText(params: {
     ]
   });
 
-  return response.choices[0]?.message?.content?.trim() || "没有生成可展示的内容。";
+  return response.choices[0]?.message?.content?.trim() || translate(locale, "没有生成可展示的内容。");
+}
+
+function getOutputLanguageName(locale: AppLocale): string {
+  if (locale === "en-US") return "English";
+  if (locale === "ja-JP") return "Japanese";
+  if (locale === "ko-KR") return "Korean";
+  return "Simplified Chinese";
+}
+
+function buildAssistantSystemPrompt(locale: AppLocale): string {
+  return `You are Linnea, a Windows desktop pet assistant. Reply in ${getOutputLanguageName(locale)} with concise, natural, friendly but not exaggerated wording. You must also classify the user's task intent and extract todo drafts. Output JSON only, no Markdown. JSON fields must be replyText, mood, taskIntent, todoCandidates, planProposal. mood must be idle/talking/happy/thinking/reminder. taskIntent must be none/simple_todo/complex_goal. none means chat, emotion, or no clear action. simple_todo means one or more directly actionable todos such as reminders, meetings, purchases, calls, or submissions. complex_goal means a goal requiring multiple steps, such as finishing a paper, preparing an exam, creating a report, finishing a project, or organizing a portfolio. For simple_todo, todoCandidates must contain title, notes, project, tags, priority, dueAt, remindAt, repeatRule, subtasks, attachments, confidence; use null or empty arrays when absent. priority must be low/medium/high/urgent, use medium if unsure. tags are short strings; project is the owning project; repeatRule is a natural language repeat rule; subtasks are {title, done}; attachments are attachment names or paths. For complex_goal, leave todoCandidates empty and output planProposal with summary, sourceMessage, needsConfirmation true, and 3-6 executable steps in items using the same todo fields with reasonable time hints. Reminder phrases must create todoCandidates with title, remindAt, usually dueAt, and optional notes. Parse relative dates using the user's local send time. dueAt/remindAt must be ISO 8601 with timezone offset, for example 2026-05-04T20:00:00+08:00. Never output timezone-less times. Extracted results are drafts; never claim they have been saved.`;
+}
+
+function buildSummarySystemPrompt(locale: AppLocale): string {
+  return `You are Linnea's daily summary module. Write in ${getOutputLanguageName(locale)}. The summary must be based primarily on todo data: open todos for today, overdue items, and upcoming reminders today are the only primary sources. Chat history is only auxiliary context for wording and must not replace todo data or be quoted. Do not create new todos. Do not output Markdown headings. Write a concise summary and action recommendation, naturally covering today's focus, priorities, and next actions. Keep it around 120-180 Chinese characters or a similar concise length in the target language.`;
+}
+
+function buildConnectionTestPrompt(locale: AppLocale): string {
+  return `You are an API connectivity test. Reply only OK. Interface language: ${getOutputLanguageName(locale)}.`;
+}
+
+function buildSelectionTranslatePrompt(locale: AppLocale, targetLanguage: string): string {
+  return `You are Linnea's selected-text translation module. Output Markdown body only. Do not add unrelated explanation and do not repeat the source text. Target language: ${targetLanguage}. If target language is auto, translate Chinese source mainly to English and other source languages mainly to ${getOutputLanguageName(locale)}. Preserve necessary lists, code, and terms.`;
+}
+
+function buildSelectionSummaryPrompt(locale: AppLocale): string {
+  return `You are Linnea's selected-text summary module. Output Markdown body only. Do not repeat the source text. Summarize key information, conclusions, and action items in ${getOutputLanguageName(locale)}. Use short lists when useful.`;
 }
 
 function createAiClient(config: AiClientConfig) {
@@ -206,13 +241,13 @@ function getTodoTargetTime(todo: { dueAt?: string; remindAt?: string }) {
   return Number.isFinite(time) ? time : undefined;
 }
 
-function localTodoExtract(text: string) {
+function localTodoExtract(text: string, locale: AppLocale) {
   const normalized = text.trim();
   if (!/(提醒我|记一下|待办|todo|要做|需要|别忘)/i.test(normalized)) return [];
   return [
     {
       title: normalized.replace(/^(提醒我|记一下|待办[:：]?)/, "").trim() || normalized,
-      notes: "由本地规则自动记录。配置 DeepSeek 访问密钥后会启用更准确的抽取。",
+      notes: translate(locale, "由本地规则自动记录。配置访问密钥后会启用更准确的抽取。"),
       project: undefined,
       tags: [],
       priority: "medium" as const,

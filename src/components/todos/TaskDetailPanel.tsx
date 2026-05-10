@@ -3,6 +3,7 @@ import { ListTodo, Save, Trash2 } from "lucide-react";
 import type { TodoItem, TodoPriority } from "../../../shared/types";
 import { splitDraftList } from "../../utils/todoHelpers";
 import { toDatetimeLocalValue, fromDatetimeLocalValue, nextMondayIso } from "../../utils/dateHelpers";
+import { useI18n } from "../../i18n";
 
 export function TaskDetailPanel({
   todo,
@@ -13,6 +14,7 @@ export function TaskDetailPanel({
   onSave(todo: TodoItem, patch: Partial<Pick<TodoItem, "title" | "notes" | "project" | "tags" | "priority" | "status" | "remindAt" | "dueAt" | "scheduledStartAt" | "scheduledEndAt" | "isAllDayScheduled" | "repeatRule" | "subtasks" | "attachments" | "completedAt">>): void;
   onDelete(todo: TodoItem): void;
 }) {
+  const { t, locale } = useI18n();
   const [title, setTitle] = React.useState("");
   const [status, setStatus] = React.useState<TodoItem["status"]>("open");
   const [project, setProject] = React.useState("");
@@ -76,8 +78,8 @@ export function TaskDetailPanel({
     return (
       <aside className="todo-detail-panel empty-detail">
         <ListTodo size={24} />
-        <strong>选择一个任务</strong>
-        <span>在中间列表选择任务后，可以在这里修改所有属性。</span>
+        <strong>{t("选择一个任务")}</strong>
+        <span>{t("在中间列表选择任务后，可以在这里修改所有属性。")}</span>
       </aside>
     );
   }
@@ -86,65 +88,65 @@ export function TaskDetailPanel({
     <aside className="todo-detail-panel">
       <div className="todo-detail-header">
         <div>
-          <strong>任务详情</strong>
-          <span>{todo.confirmedAt ? `确认于 ${new Date(todo.confirmedAt).toLocaleString()}` : `创建于 ${new Date(todo.createdAt).toLocaleString()}`}</span>
+          <strong>{t("任务详情")}</strong>
+          <span>{todo.confirmedAt ? t("确认于 {time}", { time: new Date(todo.confirmedAt).toLocaleString(locale) }) : t("创建于 {time}", { time: new Date(todo.createdAt).toLocaleString(locale) })}</span>
         </div>
         <button type="button" onClick={save}>
-          <Save size={14} /> 保存
+          <Save size={14} /> {t("保存")}
         </button>
       </div>
       <label>
-        内容
+        {t("内容")}
         <input value={title} onChange={(event) => setTitle(event.target.value)} />
       </label>
       <div className="task-pane-grid">
         <label>
-          状态
+          {t("状态")}
           <select value={status} onChange={(event) => setStatus(event.target.value as TodoItem["status"])}>
-            <option value="open">未完成</option>
-            <option value="done">已完成</option>
-            <option value="dismissed">已丢弃</option>
+            <option value="open">{t("未完成")}</option>
+            <option value="done">{t("已完成")}</option>
+            <option value="dismissed">{t("已丢弃")}</option>
           </select>
         </label>
         <label>
-          优先级
+          {t("优先级")}
           <select value={priority} onChange={(event) => setPriority(event.target.value as TodoPriority)}>
-            <option value="urgent">P0 紧急</option>
-            <option value="high">P1 高</option>
-            <option value="medium">P2 中</option>
-            <option value="low">P3 低</option>
+            <option value="urgent">{t("P0 紧急")}</option>
+            <option value="high">{t("P1 高")}</option>
+            <option value="medium">{t("P2 中")}</option>
+            <option value="low">{t("P3 低")}</option>
           </select>
         </label>
       </div>
       <div className="todo-date-shortcuts">
-        <button type="button" onClick={() => setDueAt(toDatetimeLocalValue(new Date().toISOString()))}>今天</button>
-        <button type="button" onClick={() => setDueAt(toDatetimeLocalValue(new Date(Date.now() + 24 * 60 * 60_000).toISOString()))}>明天</button>
-        <button type="button" onClick={() => setDueAt(toDatetimeLocalValue(nextMondayIso()))}>下周一</button>
-        <button type="button" onClick={() => setDueAt("")}>清除</button>
+        <button type="button" onClick={() => setDueAt(toDatetimeLocalValue(new Date().toISOString()))}>{t("今天")}</button>
+        <button type="button" onClick={() => setDueAt(toDatetimeLocalValue(new Date(Date.now() + 24 * 60 * 60_000).toISOString()))}>{t("明天")}</button>
+        <button type="button" onClick={() => setDueAt(toDatetimeLocalValue(nextMondayIso()))}>{t("下周一")}</button>
+        <button type="button" onClick={() => setDueAt("")}>{t("清除")}</button>
       </div>
       <div className="task-pane-grid">
         <label>
-          截止
+          {t("截止")}
           <input type="datetime-local" value={dueAt} onChange={(event) => setDueAt(event.target.value)} />
         </label>
         <label>
-          提醒
+          {t("提醒")}
           <input type="datetime-local" value={remindAt} onChange={(event) => setRemindAt(event.target.value)} />
         </label>
       </div>
       <div className="calendar-detail-schedule">
-        <strong>计划块</strong>
+        <strong>{t("计划块")}</strong>
         <label className="calendar-all-day-toggle">
           <input type="checkbox" checked={isAllDayScheduled} onChange={(event) => setIsAllDayScheduled(event.target.checked)} />
-          全天安排
+          {t("全天安排")}
         </label>
         <div className="task-pane-grid">
           <label>
-            开始
+            {t("开始")}
             <input type="datetime-local" value={scheduledStartAt} onChange={(event) => setScheduledStartAt(event.target.value)} />
           </label>
           <label>
-            结束
+            {t("结束")}
             <input type="datetime-local" value={scheduledEndAt} onChange={(event) => setScheduledEndAt(event.target.value)} />
           </label>
         </div>
@@ -157,38 +159,38 @@ export function TaskDetailPanel({
             scheduledEndAt: undefined,
             isAllDayScheduled: false
           });
-        }}>移回任务池</button>
+        }}>{t("移回任务池")}</button>
       </div>
       <label>
-        项目
+        {t("项目")}
         <input value={project} onChange={(event) => setProject(event.target.value)} />
       </label>
       <label>
-        标签
-        <input value={tags} onChange={(event) => setTags(event.target.value)} placeholder="用逗号分隔" />
+        {t("标签")}
+        <input value={tags} onChange={(event) => setTags(event.target.value)} placeholder={t("用逗号分隔")} />
       </label>
       <label>
-        重复
-        <input value={repeatRule} onChange={(event) => setRepeatRule(event.target.value)} placeholder="例如 每周五，或留空" />
+        {t("重复")}
+        <input value={repeatRule} onChange={(event) => setRepeatRule(event.target.value)} placeholder={t("例如 每周五，或留空")} />
       </label>
       <label>
-        子任务
-        <textarea value={subtasks} onChange={(event) => setSubtasks(event.target.value)} rows={4} placeholder="每行一个子任务" />
+        {t("子任务")}
+        <textarea value={subtasks} onChange={(event) => setSubtasks(event.target.value)} rows={4} placeholder={t("每行一个子任务")} />
       </label>
       <label>
-        备注
+        {t("备注")}
         <textarea value={notes} onChange={(event) => setNotes(event.target.value)} rows={4} />
       </label>
       <label>
-        附件
-        <textarea value={attachments} onChange={(event) => setAttachments(event.target.value)} rows={2} placeholder="每行一个附件名称或路径" />
+        {t("附件")}
+        <textarea value={attachments} onChange={(event) => setAttachments(event.target.value)} rows={2} placeholder={t("每行一个附件名称或路径")} />
       </label>
       <div className="todo-detail-log">
-        <span>创建：{new Date(todo.createdAt).toLocaleString()}</span>
-        {todo.sourceMessage && <span>来源：{todo.sourceMessage}</span>}
+        <span>{t("创建：{time}", { time: new Date(todo.createdAt).toLocaleString(locale) })}</span>
+        {todo.sourceMessage && <span>{t("来源：{source}", { source: todo.sourceMessage })}</span>}
       </div>
       <button type="button" className="todo-detail-delete" onClick={() => onDelete(todo)}>
-        <Trash2 size={14} /> 删除任务
+        <Trash2 size={14} /> {t("删除任务")}
       </button>
     </aside>
   );

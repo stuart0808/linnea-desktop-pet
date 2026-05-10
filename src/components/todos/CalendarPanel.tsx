@@ -8,6 +8,7 @@ import { formatPriority } from "../../utils/formatHelpers";
 import { isOverdueOpenTodo } from "../../utils/petHelpers";
 import { CalendarTimeCanvas, CalendarMonthCanvas } from "./CalendarCanvases";
 import { TaskDetailPanel } from "./TaskDetailPanel";
+import { useI18n } from "../../i18n";
 
 export function CalendarPanel({
   todos,
@@ -22,6 +23,7 @@ export function CalendarPanel({
   onDelete(todo: TodoItem): void;
   onQuickAdd(text: string): void;
 }) {
+  const { t, locale } = useI18n();
   type CalendarView = "day" | "week" | "month";
   const [currentTime, setCurrentTime] = React.useState(() => new Date());
   const [view, setView] = React.useState<CalendarView>("week");
@@ -55,7 +57,7 @@ export function CalendarPanel({
     .filter((todo) => todo.status === "open" && !todo.scheduledStartAt)
     .sort(compareTodosForWork), [filteredTodos]);
   const selectedTodo = todos.find((todo) => todo.id === selectedTodoId) ?? null;
-  const rangeTitle = formatCalendarRange(view, anchorDate, visibleDays);
+  const rangeTitle = formatCalendarRange(view, anchorDate, visibleDays, locale);
   const calendarDataVersion = React.useMemo(
     () => todos.map((todo) => [
       todo.id,
@@ -117,44 +119,44 @@ export function CalendarPanel({
     <section className="calendar-page">
       <div className="calendar-toolbar">
         <div className="calendar-range-controls">
-          <button type="button" onClick={() => setAnchorDate(startOfDay(new Date()))}>今天</button>
-          <button type="button" onClick={() => moveRange(-1)} aria-label="上一段">‹</button>
+          <button type="button" onClick={() => setAnchorDate(startOfDay(new Date()))}>{t("今天")}</button>
+          <button type="button" onClick={() => moveRange(-1)} aria-label={t("上一段")}>‹</button>
           <strong>{rangeTitle}</strong>
-          <button type="button" onClick={() => moveRange(1)} aria-label="下一段">›</button>
+          <button type="button" onClick={() => moveRange(1)} aria-label={t("下一段")}>›</button>
         </div>
         <div className="calendar-view-switch">
           {(["day", "week", "month"] as CalendarView[]).map((item) => (
             <button key={item} type="button" className={view === item ? "active" : ""} onClick={() => setView(item)}>
-              {item === "day" ? "日" : item === "week" ? "周" : "月"}
+              {item === "day" ? t("日") : item === "week" ? t("周") : t("月")}
             </button>
           ))}
         </div>
         <label className="calendar-search">
           <Search size={14} />
-          <input value={searchText} onChange={(event) => setSearchText(event.target.value)} placeholder="搜索任务" />
+          <input value={searchText} onChange={(event) => setSearchText(event.target.value)} placeholder={t("搜索任务")} />
         </label>
         <select value={priorityFilter} onChange={(event) => setPriorityFilter(event.target.value as TodoPriority | "all")}>
-          <option value="all">全部优先级</option>
+          <option value="all">{t("全部优先级")}</option>
           <option value="urgent">P0</option>
           <option value="high">P1</option>
           <option value="medium">P2</option>
           <option value="low">P3</option>
         </select>
         <form className="calendar-quick-add" onSubmit={submitQuickAdd}>
-          <input value={quickText} onChange={(event) => setQuickText(event.target.value)} placeholder="新建任务：@项目 #标签 !P0" />
+          <input value={quickText} onChange={(event) => setQuickText(event.target.value)} placeholder={t("新建任务：@项目 #标签 !P0")} />
           <button type="submit"><Send size={14} /></button>
         </form>
       </div>
 
       <aside className="calendar-backlog">
         <div className="calendar-backlog-header">
-          <strong>任务池</strong>
-          <span>{currentTime.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}</span>
+          <strong>{t("任务池")}</strong>
+          <span>{currentTime.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" })}</span>
         </div>
         <section>
-          <div className="calendar-pool-title">智能队列</div>
+          <div className="calendar-pool-title">{t("智能队列")}</div>
           <div className="calendar-quick-picks">
-            <span>逾期 {backlogTodos.filter((todo) => isOverdueOpenTodo(todo, Date.now())).length}</span>
+            <span>{t("逾期 {count}", { count: backlogTodos.filter((todo) => isOverdueOpenTodo(todo, Date.now())).length })}</span>
             <span>24h {backlogTodos.filter((todo) => {
               const time = getTodoTargetTime(todo);
               return typeof time === "number" && time <= Date.now() + 24 * 60 * 60_000;
@@ -163,9 +165,9 @@ export function CalendarPanel({
           </div>
         </section>
         <section>
-          <div className="calendar-pool-title">待安排</div>
+          <div className="calendar-pool-title">{t("待安排")}</div>
           <div className="calendar-backlog-list">
-            {backlogTodos.length === 0 && <div className="calendar-empty">没有待安排任务。</div>}
+            {backlogTodos.length === 0 && <div className="calendar-empty">{t("没有待安排任务。")}</div>}
             {backlogTodos.map((todo) => (
               <button
                 key={todo.id}
@@ -178,9 +180,9 @@ export function CalendarPanel({
                 <strong>{todo.title}</strong>
                 <span>
                   <small className={`priority-chip priority-${todo.priority ?? "medium"}`}>{formatPriority(todo.priority)}</small>
-                  {todo.dueAt && <small>截止 {formatRelativeTodoTime(todo)}</small>}
+                  {todo.dueAt && <small>{t("截止 {time}", { time: formatRelativeTodoTime(todo) })}</small>}
                   {todo.project && <small>@{todo.project}</small>}
-                  {!!todo.subtasks?.length && <small>{todo.subtasks.length} 子任务</small>}
+                  {!!todo.subtasks?.length && <small>{t("{count} 子任务", { count: todo.subtasks.length })}</small>}
                   {!!todo.attachments?.length && <Paperclip size={12} />}
                 </span>
               </button>

@@ -23,6 +23,7 @@ export const expandedPetBounds = { width: 560, height: 720 };
 export const workspacePreferredBounds = { width: 1680, height: 820, minWidth: 1600, minHeight: 700 };
 export const selectionPopoverCollapsedBounds = { width: 38, height: 38 };
 export const selectionPopoverExpandedBounds = { width: 372, height: 38 };
+export const selectionPopoverMaxExpandedBounds = { width: 620, height: 38 };
 
 export const state = {
   mainWindow: null as BrowserWindow | null,

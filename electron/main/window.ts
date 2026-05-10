@@ -3,12 +3,13 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { processSelectedText } from "./openaiClient.js";
 import { JsonStore } from "./storage.js";
-import { state, collapsedPetBounds, expandedPetBounds, selectionPopoverCollapsedBounds, selectionPopoverExpandedBounds } from "./state.js";
+import { state, collapsedPetBounds, expandedPetBounds, selectionPopoverCollapsedBounds, selectionPopoverExpandedBounds, selectionPopoverMaxExpandedBounds } from "./state.js";
 import { broadcastSnapshotUpdated } from "./broadcast.js";
 import { getPreloadPath, getRendererUrl, getAppIconPath, getTrayIcon, getWorkspaceInitialBounds, lockdownWindow, normalizeAccelerator } from "./windowUtils.js";
 import { syncGlobalSelectionHook, setOpenSelectionPopoverWindow } from "./selection.js";
 import { setOpenWorkspaceWindow } from "./reminder.js";
 import type { AppSettings, SelectionCapture, SelectionTextResult } from "../../shared/types.js";
+import { resolveLocale, translate } from "../../shared/i18n.js";
 
 const store = new JsonStore();
 const appUserModelId = "com.local.linnea";
@@ -177,6 +178,7 @@ export async function openWorkspaceWindow(todoId?: string): Promise<void> {
     return;
   }
 
+  const locale = resolveLocale((await store.getSettings()).language, app.getLocale());
   const initialBounds = getWorkspaceInitialBounds();
   state.workspaceWindow = new BrowserWindow({
     width: initialBounds.width,
@@ -184,7 +186,7 @@ export async function openWorkspaceWindow(todoId?: string): Promise<void> {
     minWidth: initialBounds.minWidth,
     minHeight: initialBounds.minHeight,
     show: false,
-    title: "Linnea 待办与对话",
+    title: translate(locale, "Linnea 待办与对话"),
     icon: getAppIconPath(),
     backgroundColor: "#eef7f2",
     resizable: true,
@@ -253,8 +255,10 @@ export async function processSelectionResultInBackground(result: SelectionTextRe
   try {
     const settings = await store.getSettings();
     const ai = resolveAiConfig(settings);
+    const locale = resolveLocale(settings.language, app.getLocale());
     const markdown = await processSelectedText({
       ...ai,
+      locale,
       action: result.action,
       text,
       targetLanguage
@@ -286,6 +290,7 @@ export async function openSelectionPopoverWindow(capture: SelectionCapture, x: n
   state.selectionPopoverCaptureId = capture.id;
   const windowBounds = getSelectionPopoverBounds(x, y, true, placement);
 
+  const locale = resolveLocale((await store.getSettings()).language, app.getLocale());
   state.selectionPopoverWindow = new BrowserWindow({
     width: windowBounds.width,
     height: windowBounds.height,
@@ -299,7 +304,7 @@ export async function openSelectionPopoverWindow(capture: SelectionCapture, x: n
     alwaysOnTop: true,
     skipTaskbar: true,
     focusable: false,
-    title: "Linnea 选中文本",
+    title: translate(locale, "Linnea 选中文本"),
     icon: getAppIconPath(),
     backgroundColor: "#00000000",
     webPreferences: {
@@ -339,15 +344,20 @@ export function getSelectionPopoverPlacement(x: number, y: number): "right" | "l
   const bounds = display.workArea;
   const margin = 6;
   const offset = 8;
-  return x + offset + selectionPopoverExpandedBounds.width <= bounds.x + bounds.width - margin ? "right" : "left";
+  return x + offset + selectionPopoverMaxExpandedBounds.width <= bounds.x + bounds.width - margin ? "right" : "left";
 }
 
-export function getSelectionPopoverBounds(x: number, y: number, expanded: boolean, placement = getSelectionPopoverPlacement(x, y)) {
+export function getSelectionPopoverBounds(x: number, y: number, expanded: boolean, placement = getSelectionPopoverPlacement(x, y), requestedWidth?: number) {
   const display = screen.getDisplayNearestPoint({ x, y });
-  const size = expanded ? selectionPopoverExpandedBounds : selectionPopoverCollapsedBounds;
   const bounds = display.workArea;
   const margin = 6;
   const offset = 8;
+  const maxExpandedWidth = Math.max(selectionPopoverCollapsedBounds.width, Math.min(selectionPopoverMaxExpandedBounds.width, bounds.width - margin * 2));
+  const expandedWidth = Math.min(
+    maxExpandedWidth,
+    Math.max(selectionPopoverExpandedBounds.width, Math.ceil(requestedWidth ?? selectionPopoverExpandedBounds.width))
+  );
+  const size = expanded ? { ...selectionPopoverExpandedBounds, width: expandedWidth } : selectionPopoverCollapsedBounds;
   const preferredX = x + offset;
   const preferredY = y + offset;
   const targetX = placement === "right"
@@ -364,24 +374,36 @@ export function getSelectionPopoverBounds(x: number, y: number, expanded: boolea
   };
 }
 
-export function resizeSelectionPopoverWindow(expanded: boolean): void {
-  void expanded;
+export function resizeSelectionPopoverWindow(expanded: boolean, requestedWidth?: number): void {
   if (!state.selectionPopoverWindow || state.selectionPopoverWindow.isDestroyed() || !state.selectionPopoverAnchor) return;
-  const bounds = getSelectionPopoverBounds(state.selectionPopoverAnchor.x, state.selectionPopoverAnchor.y, true, state.selectionPopoverAnchor.placement);
+  const bounds = getSelectionPopoverBounds(state.selectionPopoverAnchor.x, state.selectionPopoverAnchor.y, expanded, state.selectionPopoverAnchor.placement, requestedWidth);
   const current = state.selectionPopoverWindow.getBounds();
   if (current.x !== bounds.x || current.y !== bounds.y || current.width !== bounds.width || current.height !== bounds.height) {
     state.selectionPopoverWindow.setBounds(bounds, false);
   }
 }
 
-export function createTray(): void {
+export async function createTray(): Promise<void> {
+  const locale = resolveLocale((await store.getSettings()).language, app.getLocale());
   state.tray = new Tray(getTrayIcon());
   state.tray.setToolTip("Linnea");
   state.tray.setContextMenu(
     Menu.buildFromTemplate([
-      { label: "显示 / 隐藏", click: () => toggleWindow() },
+      { label: translate(locale, "显示 / 隐藏"), click: () => toggleWindow() },
       { type: "separator" },
-      { label: "退出", click: () => app.quit() }
+      { label: translate(locale, "退出"), click: () => app.quit() }
+    ])
+  );
+}
+
+export async function refreshTrayMenu(): Promise<void> {
+  if (!state.tray || state.tray.isDestroyed()) return;
+  const locale = resolveLocale((await store.getSettings()).language, app.getLocale());
+  state.tray.setContextMenu(
+    Menu.buildFromTemplate([
+      { label: translate(locale, "显示 / 隐藏"), click: () => toggleWindow() },
+      { type: "separator" },
+      { label: translate(locale, "退出"), click: () => app.quit() }
     ])
   );
 }

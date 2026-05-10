@@ -10,8 +10,10 @@ import { CalendarPanel } from "../components/todos/CalendarPanel";
 import { SummaryPanel } from "../components/todos/SummaryPanel";
 import { CodexWorkspacePanel } from "../components/codex/CodexWorkspacePanel";
 import { SettingsPanel } from "../components/settings/SettingsPanel";
+import { useI18n } from "../i18n";
 
 export function WorkspaceWindow() {
+  const { t } = useI18n();
   const api: DesktopPetApi | undefined = window.desktopPet;
   const [messages, setMessages] = React.useState<ConversationMessage[]>([]);
   const [todos, setTodos] = React.useState<TodoItem[]>([]);
@@ -83,12 +85,12 @@ export function WorkspaceWindow() {
     return api.events.onSelectedTextTodo((text) => {
       void sendText(
         `请根据下面这段从全局选区捕获的文字生成待办。如果它是复杂目标，请拆成可确认的计划步骤；如果只是单个事项，请生成一条待办：\n\n${text}`,
-        "我在从选中文字里整理待办..."
+        t("我在从选中文字里整理待办...")
       );
     });
-  }, [api, busy]);
+  }, [api, busy, t]);
 
-  async function sendText(text: string, placeholderText = "我在整理你刚刚说的内容...") {
+  async function sendText(text: string, placeholderText = t("我在整理你刚刚说的内容...")) {
     if (!text || busy) return;
     setBusy(true);
     const userMessage: ConversationMessage = {
@@ -110,7 +112,7 @@ export function WorkspaceWindow() {
         const assistantMessage: ConversationMessage = {
           id: crypto.randomUUID(),
           role: "assistant",
-          text: "Linnea 桌面服务暂未连接，请重启应用。",
+          text: t("Linnea 桌面服务暂未连接，请重启应用。"),
           createdAt: new Date().toISOString()
         };
         setMessages((current) => [...current, assistantMessage]);
@@ -144,21 +146,21 @@ export function WorkspaceWindow() {
       completedAt: status === "done" ? new Date().toISOString() : undefined
     });
     setTodos((current) => current.map((item) => (item.id === todo.id ? updated : item)));
-    showToast(status === "done" ? "已完成任务" : "已恢复任务");
+    showToast(status === "done" ? t("已完成任务") : t("已恢复任务"));
   }
 
   async function deleteTodo(todo: TodoItem) {
     if (!api) return;
     const removed = await api.todo.delete(todo.id);
     setTodos((current) => current.filter((item) => item.id !== removed.id));
-    showToast("已删除任务");
+    showToast(t("已删除任务"));
   }
 
   async function updateTodo(todo: TodoItem, patch: Partial<Pick<TodoItem, "title" | "notes" | "project" | "tags" | "priority" | "status" | "remindAt" | "dueAt" | "scheduledStartAt" | "scheduledEndAt" | "isAllDayScheduled" | "repeatRule" | "subtasks" | "attachments" | "completedAt">>) {
     if (!api) return;
     const updated = await api.todo.update(todo.id, patch);
     setTodos((current) => current.map((item) => (item.id === todo.id ? updated : item)));
-    showToast("保存成功");
+    showToast(t("保存成功"));
   }
 
   async function acceptPendingPlan() {
@@ -168,7 +170,7 @@ export function WorkspaceWindow() {
       const saved = await api.todo.acceptPlanProposal(pendingPlan.items, pendingPlan.sourceMessage);
       setTodos(await api.todo.list());
       setPendingPlan(null);
-      showToast(`已保存 ${saved.todos.length} 个待办`);
+      showToast(t("已保存 {count} 个待办", { count: saved.todos.length }));
     } catch {
       // error silently
     } finally {
@@ -192,7 +194,7 @@ export function WorkspaceWindow() {
       const saved = await api.todo.acceptPlanProposal(plan.items, plan.sourceMessage, message.id);
       setTodos(await api.todo.list());
       setMessages(await api.chat.listMessages());
-      showToast(`已保存 ${saved.todos.length} 个待办`);
+      showToast(t("已保存 {count} 个待办", { count: saved.todos.length }));
     } catch {
       // error silently
     } finally {
@@ -256,7 +258,7 @@ export function WorkspaceWindow() {
     try {
       setSummaryText(await api.summary.generate());
     } catch (error) {
-      setSummaryError(error instanceof Error ? error.message : "生成总结失败。");
+      setSummaryError(error instanceof Error ? error.message : t("生成总结失败。"));
     } finally {
       setSummaryBusy(false);
     }
@@ -271,43 +273,43 @@ export function WorkspaceWindow() {
       <aside className="workspace-sidebar">
         <div className="workspace-brand">
           <strong>Linnea</strong>
-          <span>桌宠助手</span>
+          <span>{t("桌宠助手")}</span>
         </div>
-        <nav className="workspace-nav" aria-label="Linnea 工作窗口导航">
+        <nav className="workspace-nav" aria-label={t("Linnea 工作窗口导航")}>
           <button
             className={`workspace-nav-item ${activeTab === "quickstart" ? "active" : ""}`}
             onClick={() => setActiveTab("quickstart")}
           >
             <FileText size={17} />
-            快速入门
+            {t("快速入门")}
           </button>
           <button
             className={`workspace-nav-item ${activeTab === "workspace" ? "active" : ""}`}
             onClick={() => setActiveTab("workspace")}
           >
             <MessageCircle size={17} />
-            对话
+            {t("对话")}
           </button>
           <button
             className={`workspace-nav-item ${activeTab === "todos" ? "active" : ""}`}
             onClick={() => setActiveTab("todos")}
           >
             <ListTodo size={17} />
-            待办
+            {t("待办")}
           </button>
           <button
             className={`workspace-nav-item ${activeTab === "calendar" ? "active" : ""}`}
             onClick={() => setActiveTab("calendar")}
           >
             <CalendarDays size={17} />
-            日历
+            {t("日历")}
           </button>
           <button
             className={`workspace-nav-item ${activeTab === "summary" ? "active" : ""}`}
             onClick={() => setActiveTab("summary")}
           >
             <BarChart3 size={17} />
-            总结
+            {t("总结")}
           </button>
           <button
             className={`workspace-nav-item ${activeTab === "codex" ? "active" : ""}`}
@@ -321,7 +323,7 @@ export function WorkspaceWindow() {
             onClick={() => setActiveTab("settings")}
           >
             <Settings size={17} />
-            设置
+            {t("设置")}
           </button>
         </nav>
       </aside>
@@ -335,10 +337,10 @@ export function WorkspaceWindow() {
           <section className="workspace-grid chat-only-grid">
             <section className="workspace-card chat-card">
               <div className="section-title">
-                <span>对话</span>
+                <span>{t("对话")}</span>
               </div>
               <div className="workspace-messages">
-                {messages.length === 0 && <div className="empty">还没有对话。</div>}
+                {messages.length === 0 && <div className="empty">{t("还没有对话。")}</div>}
                 {messages.slice(-20).map((message) => (
                   <ChatMessage
                     key={message.id}
@@ -361,9 +363,9 @@ export function WorkspaceWindow() {
                 <input
                   value={input}
                   onChange={(event) => setInput(event.target.value)}
-                  placeholder="和 Linnea 说话，或让她记录待办..."
+                  placeholder={t("和 Linnea 说话，或让她记录待办...")}
                 />
-                <button type="submit" disabled={busy} aria-label="发送">
+                <button type="submit" disabled={busy} aria-label={t("发送")}>
                   <Send size={17} />
                 </button>
               </form>
@@ -378,7 +380,7 @@ export function WorkspaceWindow() {
             onDelete={deleteTodo}
             onQuickAdd={(text) => {
               setActiveTab("workspace");
-              void sendText(text, "我在整理任务草案...");
+              void sendText(text, t("我在整理任务草案..."));
             }}
           />
         ) : activeTab === "calendar" ? (
@@ -389,7 +391,7 @@ export function WorkspaceWindow() {
             onDelete={deleteTodo}
             onQuickAdd={(text) => {
               setActiveTab("workspace");
-              void sendText(text, "我在整理任务草案...");
+              void sendText(text, t("我在整理任务草案..."));
             }}
           />
         ) : activeTab === "summary" ? (
@@ -403,7 +405,7 @@ export function WorkspaceWindow() {
             onUpdateTodo={updateTodo}
             onQuickAdd={(text) => {
               setActiveTab("workspace");
-              void sendText(text, "我在整理任务草案...");
+              void sendText(text, t("我在整理任务草案..."));
             }}
           />
         ) : activeTab === "codex" ? (
@@ -411,7 +413,7 @@ export function WorkspaceWindow() {
         ) : (
           <section className="workspace-card settings-card">
             <div className="section-title">
-              <span>设置</span>
+              <span>{t("设置")}</span>
             </div>
             {settings ? (
               <SettingsPanel
@@ -427,7 +429,7 @@ export function WorkspaceWindow() {
                 api={api}
               />
             ) : (
-              <div className="empty">设置加载中。</div>
+              <div className="empty">{t("设置加载中。")}</div>
             )}
           </section>
         )}

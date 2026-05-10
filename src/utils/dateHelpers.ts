@@ -71,12 +71,12 @@ export function formatScheduledTime(todo: TodoItem) {
   return `${startText}-${end.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}`;
 }
 
-export function formatCalendarRange(view: "day" | "week" | "month", anchorDate: Date, visibleDays: Date[]) {
-  if (view === "month") return anchorDate.toLocaleDateString(undefined, { year: "numeric", month: "long" });
-  if (view === "day") return anchorDate.toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric", weekday: "long" });
+export function formatCalendarRange(view: "day" | "week" | "month", anchorDate: Date, visibleDays: Date[], locale?: string) {
+  if (view === "month") return anchorDate.toLocaleDateString(locale, { year: "numeric", month: "long" });
+  if (view === "day") return anchorDate.toLocaleDateString(locale, { year: "numeric", month: "long", day: "numeric", weekday: "long" });
   const first = visibleDays[0] ?? anchorDate;
   const last = visibleDays[visibleDays.length - 1] ?? anchorDate;
-  return `${first.toLocaleDateString(undefined, { month: "long", day: "numeric" })} - ${last.toLocaleDateString(undefined, { month: "long", day: "numeric" })}`;
+  return `${first.toLocaleDateString(locale, { month: "long", day: "numeric" })} - ${last.toLocaleDateString(locale, { month: "long", day: "numeric" })}`;
 }
 
 export function formatPlanTime(value?: string) {

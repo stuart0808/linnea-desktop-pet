@@ -15,6 +15,7 @@ interface PersistedState {
 type SettingsOnDisk = Omit<AppSettings, "aiApiKey" | "openAiApiKey">;
 
 const defaultSettings: AppSettings = {
+  language: "system",
   aiProvider: "deepseek",
   aiProviderName: "DeepSeek",
   aiBaseUrl: "https://api.deepseek.com",
@@ -305,6 +306,7 @@ function normalizeSettings(settings: AppSettings): AppSettings {
   const aiBaseUrl = normalizeOptionalString(settings.aiBaseUrl) ?? preset.baseUrl;
   return {
     ...settings,
+    language: normalizeLanguage(settings.language),
     aiProvider: provider,
     aiProviderName: provider === "custom"
       ? normalizeNonEmptyString(settings.aiProviderName) ?? "自定义提供商"
@@ -323,6 +325,10 @@ function normalizeSettings(settings: AppSettings): AppSettings {
     skippedUpdateVersion: normalizeOptionalString(settings.skippedUpdateVersion),
     petAppearance: settings.petAppearance?.directory ? settings.petAppearance : undefined
   };
+}
+
+function normalizeLanguage(value: AppSettings["language"] | undefined): AppSettings["language"] {
+  return value === "zh-CN" || value === "en-US" || value === "ja-JP" || value === "ko-KR" ? value : "system";
 }
 
 function normalizeCodexSandbox(value: AppSettings["codexDefaultSandbox"] | undefined): AppSettings["codexDefaultSandbox"] {

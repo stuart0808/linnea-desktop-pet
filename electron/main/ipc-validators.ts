@@ -126,7 +126,7 @@ const OPTIONAL_STRING_SETTINGS = new Set<keyof AppSettings>([
 ]);
 
 const KNOWN_SETTINGS_KEYS = new Set<string>([
-  "aiProvider", "aiProviderName", "aiBaseUrl", "aiModel", "aiApiKey",
+  "language", "aiProvider", "aiProviderName", "aiBaseUrl", "aiModel", "aiApiKey",
   "openAiApiKey", "openAiModel", "alwaysOnTop", "autoSaveTodos",
   "systemNotifications", "launchAtLogin", "keepChatHistory",
   "selectionToolsEnabled", "quickAiRecordShortcut", "workspaceThemeColor",
@@ -148,7 +148,11 @@ export function validateSettingsPatch(value: unknown): Partial<AppSettings> {
     if (BOOL_SETTINGS.has(key as keyof AppSettings)) assertBoolean(v, key);
     else if (STRING_SETTINGS.has(key as keyof AppSettings)) assertString(v, key);
     else if (OPTIONAL_STRING_SETTINGS.has(key as keyof AppSettings)) assertOptionalString(v, key);
-    else if (key === "aiProvider") {
+    else if (key === "language") {
+      if (v !== "system" && v !== "zh-CN" && v !== "en-US" && v !== "ja-JP" && v !== "ko-KR") {
+        throw new Error(`settings key "language" has an invalid value.`);
+      }
+    } else if (key === "aiProvider") {
       if (v !== "deepseek" && v !== "openai" && v !== "custom") {
         throw new Error(`settings key "aiProvider" must be "deepseek", "openai", or "custom".`);
       }

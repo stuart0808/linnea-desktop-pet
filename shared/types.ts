@@ -53,6 +53,7 @@ export interface ConversationMessage {
 }
 
 export interface AppSettings {
+  language: AppLanguage;
   aiProvider: "deepseek" | "openai" | "custom";
   aiProviderName?: string;
   aiBaseUrl?: string;
@@ -74,6 +75,9 @@ export interface AppSettings {
   skippedUpdateVersion?: string;
   petAppearance?: PetAppearance;
 }
+
+export type AppLocale = "zh-CN" | "en-US" | "ja-JP" | "ko-KR";
+export type AppLanguage = "system" | AppLocale;
 
 export interface PetAppearance {
   name: string;
@@ -341,7 +345,7 @@ export interface DesktopPetApi {
     getResult(id: string): Promise<SelectionTextResult | null>;
     getCapture(id: string): Promise<SelectionCapture | null>;
     resolveCapture(id: string): Promise<SelectionCapture>;
-    resizePopover(expanded: boolean): Promise<void>;
+    resizePopover(expanded: boolean, width?: number): Promise<void>;
     createTodoFromCapture(id: string): Promise<void>;
     addAskCapture(id: string): Promise<SelectionAskDraft>;
     getAskDraft(): Promise<SelectionAskDraft>;

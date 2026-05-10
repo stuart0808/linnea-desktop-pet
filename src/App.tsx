@@ -7,6 +7,7 @@ import { WorkspaceWindow } from "./windows/WorkspaceWindow";
 import { SelectionResultWindow } from "./windows/SelectionResultWindow";
 import { GlobalSelectionPopoverWindow } from "./windows/GlobalSelectionPopoverWindow";
 import { CodexTerminalWindow } from "./components/codex/CodexTerminalWindow";
+import { I18nProvider } from "./i18n";
 
 export function App() {
   const searchParams = new URLSearchParams(window.location.search);
@@ -24,13 +25,13 @@ export function App() {
 
   if (windowMode === "selection-result") {
     const resultId = searchParams.get("id") ?? "";
-    return <SelectionResultWindow api={api} resultId={resultId} themeStyle={themeStyle} />;
+    return <I18nProvider api={api}><SelectionResultWindow api={api} resultId={resultId} themeStyle={themeStyle} /></I18nProvider>;
   }
 
   if (windowMode === "selection-popover") {
     const captureId = searchParams.get("id") ?? "";
     const placement = searchParams.get("placement") === "left" ? "left" : "right";
-    return <GlobalSelectionPopoverWindow api={api} captureId={captureId} placement={placement} themeStyle={themeStyle} />;
+    return <I18nProvider api={api}><GlobalSelectionPopoverWindow api={api} captureId={captureId} placement={placement} themeStyle={themeStyle} /></I18nProvider>;
   }
 
   if (windowMode === "codex") {
@@ -40,6 +41,7 @@ export function App() {
     const sandbox = normalizeCodexSandbox(searchParams.get("sandbox"));
     const approval = normalizeCodexApproval(searchParams.get("approval"));
     return (
+      <I18nProvider api={api}>
       <CodexTerminalWindow
         api={api}
         sessionId={sessionId}
@@ -49,12 +51,13 @@ export function App() {
         approval={approval}
         themeStyle={themeStyle}
       />
+      </I18nProvider>
     );
   }
 
   if (windowMode === "workspace") {
-    return <WorkspaceWindow />;
+    return <I18nProvider api={api}><WorkspaceWindow /></I18nProvider>;
   }
 
-  return <PetWindow />;
+  return <I18nProvider api={api}><PetWindow /></I18nProvider>;
 }

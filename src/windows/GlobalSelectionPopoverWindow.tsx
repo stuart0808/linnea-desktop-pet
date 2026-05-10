@@ -1,6 +1,7 @@
 import React from "react";
 import { FileText, Languages, ListTodo, MessageCircle, Sparkles } from "lucide-react";
 import type { DesktopPetApi, SelectionAskDraft, SelectionCapture } from "../../shared/types";
+import { useI18n } from "../i18n";
 
 type SelectionAction = "summarize" | "translate" | "todo" | "ask" | "ask-submit";
 
@@ -15,6 +16,9 @@ export function GlobalSelectionPopoverWindow({
   placement: "right" | "left";
   themeStyle: React.CSSProperties;
 }) {
+  const { t } = useI18n();
+  const shellRef = React.useRef<HTMLElement | null>(null);
+  const toolbarRef = React.useRef<HTMLDivElement | null>(null);
   const [capture, setCapture] = React.useState<SelectionCapture | null>(null);
   const [busyAction, setBusyAction] = React.useState<SelectionAction | null>(null);
   const [askDraft, setAskDraft] = React.useState<SelectionAskDraft>({ count: 0, text: "", items: [] });
@@ -22,19 +26,19 @@ export function GlobalSelectionPopoverWindow({
 
   React.useEffect(() => {
     if (!api) {
-      setError("Linnea 桌面服务暂未连接");
+      setError(t("Linnea 桌面服务暂未连接"));
       return;
     }
     if (!captureId) {
-      setError("选区丢失");
+      setError(t("选区丢失"));
       return;
     }
     void api.selection.getCapture(captureId)
       .then((value) => {
         if (value) setCapture(value);
-        else setError("选区已失效");
+        else setError(t("选区已失效"));
       })
-      .catch(() => setError("读取选区失败"));
+      .catch(() => setError(t("读取选区失败")));
     void api.selection.getAskDraft().then(setAskDraft).catch(() => undefined);
   }, [api, captureId]);
 
@@ -49,6 +53,20 @@ export function GlobalSelectionPopoverWindow({
       void api?.selection.resizePopover(false);
     };
   }, [api]);
+
+  function getExpandedWidth() {
+    const toolbarWidth = toolbarRef.current?.scrollWidth ?? 0;
+    const dotWidth = 28;
+    const paddingAndBorder = 14;
+    const gap = 6;
+    return Math.ceil(dotWidth + toolbarWidth + paddingAndBorder + gap);
+  }
+
+  function resizePopover(expanded: boolean) {
+    if (!api) return;
+    const width = expanded ? getExpandedWidth() : undefined;
+    void api.selection.resizePopover(expanded, width);
+  }
 
   async function runAction(action: SelectionAction) {
     if (!api || !capture || busyAction) return;
@@ -75,7 +93,7 @@ export function GlobalSelectionPopoverWindow({
         window.close();
         return;
       }
-      setError(reason instanceof Error ? reason.message : "处理失败");
+      setError(reason instanceof Error ? reason.message : t("处理失败"));
       setBusyAction(null);
     }
   }
@@ -83,13 +101,14 @@ export function GlobalSelectionPopoverWindow({
   return (
     <main
       className={`global-selection-popover-shell ${placement === "left" ? "expand-left" : "expand-right"}`}
+      ref={shellRef}
       style={themeStyle}
-      onMouseEnter={() => void api?.selection.resizePopover(true)}
-      onMouseLeave={() => void api?.selection.resizePopover(false)}
-      onFocus={() => void api?.selection.resizePopover(true)}
+      onMouseEnter={() => resizePopover(true)}
+      onMouseLeave={() => resizePopover(false)}
+      onFocus={() => resizePopover(true)}
       onBlur={(event) => {
         if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-          void api?.selection.resizePopover(false);
+          resizePopover(false);
         }
       }}
     >
@@ -100,21 +119,21 @@ export function GlobalSelectionPopoverWindow({
           <span className="selection-popover-dot" aria-hidden="true">
             <Sparkles size={16} />
           </span>
-          <div className="selection-toolbar" aria-label="选中文字操作">
-            <button type="button" title="总结" disabled={!capture || Boolean(busyAction)} onClick={() => void runAction("summarize")}>
-              <FileText size={14} /> {busyAction === "summarize" ? "总结中..." : "总结"}
+          <div className="selection-toolbar" ref={toolbarRef} aria-label={t("选中文字操作")}>
+            <button type="button" title={t("总结")} disabled={!capture || Boolean(busyAction)} onClick={() => void runAction("summarize")}>
+              <FileText size={14} /> {busyAction === "summarize" ? t("总结中...") : t("总结")}
             </button>
-            <button type="button" title="翻译" disabled={!capture || Boolean(busyAction)} onClick={() => void runAction("translate")}>
-              <Languages size={14} /> {busyAction === "translate" ? "翻译中..." : "翻译"}
+            <button type="button" title={t("翻译")} disabled={!capture || Boolean(busyAction)} onClick={() => void runAction("translate")}>
+              <Languages size={14} /> {busyAction === "translate" ? t("翻译中...") : t("翻译")}
             </button>
-            <button type="button" title="生成待办" disabled={!capture || Boolean(busyAction)} onClick={() => void runAction("todo")}>
-              <ListTodo size={14} /> {busyAction === "todo" ? "整理中..." : "待办"}
+            <button type="button" title={t("生成待办")} disabled={!capture || Boolean(busyAction)} onClick={() => void runAction("todo")}>
+              <ListTodo size={14} /> {busyAction === "todo" ? t("整理中...") : t("待办")}
             </button>
-            <button type="button" title="加入提问" disabled={!capture || Boolean(busyAction)} onClick={() => void runAction("ask")}>
-              <MessageCircle size={14} /> {busyAction === "ask" ? "加入中..." : `加入${askDraft.count ? ` ${askDraft.count}` : ""}`}
+            <button type="button" title={t("加入提问")} disabled={!capture || Boolean(busyAction)} onClick={() => void runAction("ask")}>
+              <MessageCircle size={14} /> {busyAction === "ask" ? t("加入中...") : t("加入{count}", { count: askDraft.count ? ` ${askDraft.count}` : "" })}
             </button>
-            <button type="button" title="提交提问" disabled={!capture || Boolean(busyAction)} onClick={() => void runAction("ask-submit")}>
-              <Sparkles size={14} /> {busyAction === "ask-submit" ? "打开中..." : "提问"}
+            <button type="button" title={t("提交提问")} disabled={!capture || Boolean(busyAction)} onClick={() => void runAction("ask-submit")}>
+              <Sparkles size={14} /> {busyAction === "ask-submit" ? t("打开中...") : t("提问")}
             </button>
           </div>
         </>

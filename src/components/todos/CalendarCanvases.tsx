@@ -3,6 +3,7 @@ import type { TodoItem } from "../../../shared/types";
 import { formatDateKey, formatScheduledTime, isSameDay, getCalendarMonthDays, startOfMonth } from "../../utils/dateHelpers";
 import { compareTodosForWork, getTodoTargetTime } from "../../utils/todoHelpers";
 import { getCalendarDisplayDate } from "../../utils/dateHelpers";
+import { useI18n } from "../../i18n";
 
 const DAY_START_HOUR = 8;
 const DAY_END_HOUR = 22;
@@ -145,6 +146,7 @@ export function CalendarBlock({
   onDragStart?(event: React.DragEvent, todo: TodoItem): void;
   onResizeStart?(event: React.PointerEvent, todo: TodoItem): void;
 }) {
+  const { t } = useI18n();
   const risk = getCalendarRisk(todo, now);
   return (
     <button
@@ -158,13 +160,13 @@ export function CalendarBlock({
       }}
       onDragStart={(event) => onDragStart?.(event, todo)}
     >
-      {risk && <b className="calendar-risk-mark" aria-label={risk}>!</b>}
+      {risk && <b className="calendar-risk-mark" aria-label={t(risk)}>!</b>}
       <strong>{todo.title}</strong>
-      <span>{todo.isAllDayScheduled ? "全天" : formatScheduledTime(todo)}</span>
+      <span>{todo.isAllDayScheduled ? t("全天") : formatScheduledTime(todo)}</span>
       <i
         role="button"
         tabIndex={0}
-        aria-label="移回任务池"
+        aria-label={t("移回任务池")}
         onClick={(event) => {
           event.stopPropagation();
           onUnschedule(todo);
@@ -175,7 +177,7 @@ export function CalendarBlock({
       {onResizeStart && (
         <span
           className="calendar-resize-handle"
-          title="拖动调整时长"
+          title={t("拖动调整时长")}
           aria-hidden="true"
           onPointerDown={(event) => onResizeStart(event, todo)}
         />
@@ -203,6 +205,7 @@ export function CalendarTimeCanvas({
   onScheduleRange(todo: TodoItem, start: Date, end: Date, allDay?: boolean): void;
   onUnschedule(todo: TodoItem): void;
 }) {
+  const { t, locale } = useI18n();
   const hours = Array.from({ length: DAY_END_HOUR - DAY_START_HOUR }, (_, index) => index + DAY_START_HOUR);
   const scheduledTodos = todos.filter((todo) => todo.scheduledStartAt);
   const [resizeDraft, setResizeDraft] = React.useState<{ todoId: string; end: Date } | null>(null);
@@ -265,11 +268,11 @@ export function CalendarTimeCanvas({
       <div className="calendar-time-head-spacer" />
       {days.map((day) => (
         <div key={formatDateKey(day)} className="calendar-day-heading">
-          <strong>{day.toLocaleDateString(undefined, { weekday: "short" })}</strong>
-          <span>{day.toLocaleDateString(undefined, { month: "2-digit", day: "2-digit" })}</span>
+          <strong>{day.toLocaleDateString(locale, { weekday: "short" })}</strong>
+          <span>{day.toLocaleDateString(locale, { month: "2-digit", day: "2-digit" })}</span>
         </div>
       ))}
-      <div className="calendar-all-day-label">全天</div>
+      <div className="calendar-all-day-label">{t("全天")}</div>
       {days.map((day) => (
         <div
           key={`${formatDateKey(day)}-all`}
@@ -363,11 +366,16 @@ export function CalendarMonthCanvas({
   onSelectTodo(id: string): void;
   onSelectDate(date: Date): void;
 }) {
+  const { t, locale } = useI18n();
   const monthStart = startOfMonth(anchorDate);
   const days = getCalendarMonthDays(monthStart);
+  const weekdayLabels = Array.from({ length: 7 }, (_, index) => {
+    const day = new Date(2024, 0, 1 + index);
+    return day.toLocaleDateString(locale, { weekday: "short" });
+  });
   return (
     <div className="calendar-month-canvas">
-      {["一", "二", "三", "四", "五", "六", "日"].map((day) => <span key={day} className="calendar-month-weekday">{day}</span>)}
+      {weekdayLabels.map((day) => <span key={day} className="calendar-month-weekday">{day}</span>)}
       {days.map((day) => {
         const dayTodos = todos
           .filter((todo) => isSameDay(getCalendarDisplayDate(todo), day))
@@ -390,7 +398,7 @@ export function CalendarMonthCanvas({
                   {todo.title}
                 </span>
               ))}
-              {dayTodos.length > 3 && <small>+{dayTodos.length - 3} 更多</small>}
+              {dayTodos.length > 3 && <small>{t("+{count} 更多", { count: dayTodos.length - 3 })}</small>}
             </div>
           </button>
         );

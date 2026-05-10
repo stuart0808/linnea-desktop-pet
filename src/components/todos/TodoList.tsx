@@ -5,6 +5,7 @@ import { startOfDay } from "../../utils/dateHelpers";
 import { getTodoTargetTime, compareTodosForWork, groupTodosForDisplay } from "../../utils/todoHelpers";
 import { formatPriority, formatRelativeTodoTime } from "../../utils/formatHelpers";
 import { TaskDetailPanel } from "./TaskDetailPanel";
+import { useI18n } from "../../i18n";
 
 export function TodoList({
   todos,
@@ -21,6 +22,7 @@ export function TodoList({
   onDelete(todo: TodoItem): void;
   onQuickAdd(text: string): void;
 }) {
+  const { t } = useI18n();
   type TodoScope = "inbox" | "today" | "next7" | "overdue" | "all" | "done" | "repeating";
   type TodoViewMode = "list" | "grouped" | "compact";
   const [scope, setScope] = React.useState<TodoScope>("inbox");
@@ -77,22 +79,22 @@ export function TodoList({
   }, [nextWeekEnd, now, priorityFilter, scope, searchText, selectedProject, selectedTags, todayStart, todos, tomorrowStart]);
   const selectedTodo = todos.find((todo) => todo.id === selectedTodoId) ?? visibleTodos[0] ?? null;
   const scopeItems: Array<{ id: TodoScope; label: string; count: number; icon: React.ReactNode }> = [
-    { id: "inbox", label: "收件箱", count: openTodos.filter((todo) => !todo.project).length, icon: <Inbox size={15} /> },
-    { id: "today", label: "今天", count: openTodos.filter((todo) => {
+    { id: "inbox", label: t("收件箱"), count: openTodos.filter((todo) => !todo.project).length, icon: <Inbox size={15} /> },
+    { id: "today", label: t("今天"), count: openTodos.filter((todo) => {
       const time = getTodoTargetTime(todo);
       return typeof time === "number" && time >= todayStart && time < tomorrowStart;
     }).length, icon: <Clock size={15} /> },
-    { id: "next7", label: "接下来 7 天", count: openTodos.filter((todo) => {
+    { id: "next7", label: t("接下来 7 天"), count: openTodos.filter((todo) => {
       const time = getTodoTargetTime(todo);
       return typeof time === "number" && time >= tomorrowStart && time < nextWeekEnd;
     }).length, icon: <CalendarDays size={15} /> },
-    { id: "overdue", label: "逾期", count: openTodos.filter((todo) => {
+    { id: "overdue", label: t("逾期"), count: openTodos.filter((todo) => {
       const time = getTodoTargetTime(todo);
       return typeof time === "number" && time <= now;
     }).length, icon: <AlertTriangle size={15} /> },
-    { id: "all", label: "全部", count: openTodos.length, icon: <ListTodo size={15} /> },
-    { id: "done", label: "已完成", count: doneTodos.length, icon: <Check size={15} /> },
-    { id: "repeating", label: "重复任务", count: todos.filter((todo) => todo.repeatRule).length, icon: <RotateCcw size={15} /> }
+    { id: "all", label: t("全部"), count: openTodos.length, icon: <ListTodo size={15} /> },
+    { id: "done", label: t("已完成"), count: doneTodos.length, icon: <Check size={15} /> },
+    { id: "repeating", label: t("重复任务"), count: todos.filter((todo) => todo.repeatRule).length, icon: <RotateCcw size={15} /> }
   ];
 
   React.useEffect(() => {
@@ -153,10 +155,10 @@ export function TodoList({
               <small className={`priority-chip priority-${todo.priority ?? "medium"}`}>{formatPriority(todo.priority)}</small>
               {todo.project && <small>@{todo.project}</small>}
               {(todo.dueAt || todo.remindAt) && <small>{formatRelativeTodoTime(todo)}</small>}
-              {!!todo.subtasks?.length && <small>{todo.subtasks.filter((subtask) => subtask.done).length}/{todo.subtasks.length} 子任务</small>}
+              {!!todo.subtasks?.length && <small>{t("{done}/{total} 子任务", { done: todo.subtasks.filter((subtask) => subtask.done).length, total: todo.subtasks.length })}</small>}
               {todo.repeatRule && <small><RotateCcw size={11} /> {todo.repeatRule}</small>}
               {!!todo.attachments?.length && <small><Paperclip size={11} /> {todo.attachments.length}</small>}
-              {!!todo.notes && <small><FileText size={11} /> 备注</small>}
+              {!!todo.notes && <small><FileText size={11} /> {t("备注")}</small>}
             </span>
           )}
         </span>
@@ -175,7 +177,7 @@ export function TodoList({
     <section className="todo-workspace">
       <aside className="todo-scope-panel">
         <div className="todo-scope-section">
-          <strong>范围</strong>
+          <strong>{t("范围")}</strong>
           {scopeItems.map((item) => (
             <button
               key={item.id}
@@ -190,8 +192,8 @@ export function TodoList({
           ))}
         </div>
         <div className="todo-scope-section">
-          <strong>项目</strong>
-          {projects.length === 0 && <span className="todo-filter-empty">暂无项目</span>}
+          <strong>{t("项目")}</strong>
+          {projects.length === 0 && <span className="todo-filter-empty">{t("暂无项目")}</span>}
           {projects.map(([project, count]) => (
             <button
               key={project}
@@ -206,7 +208,7 @@ export function TodoList({
           ))}
         </div>
         <div className="todo-scope-section">
-          <strong>标签</strong>
+          <strong>{t("标签")}</strong>
           <div className="todo-tag-filter">
             {tags.slice(0, 12).map(([tagName, count]) => (
               <button
@@ -218,19 +220,19 @@ export function TodoList({
                 <Tag size={12} /> {tagName} <small>{count}</small>
               </button>
             ))}
-            {tags.length === 0 && <span className="todo-filter-empty">暂无标签</span>}
+            {tags.length === 0 && <span className="todo-filter-empty">{t("暂无标签")}</span>}
           </div>
         </div>
         <div className="todo-scope-section">
-          <strong>过滤</strong>
+          <strong>{t("过滤")}</strong>
           <select value={priorityFilter} onChange={(event) => setPriorityFilter(event.target.value as TodoPriority | "all")}>
-            <option value="all">全部优先级</option>
-            <option value="urgent">P0 紧急</option>
-            <option value="high">P1 高</option>
-            <option value="medium">P2 中</option>
-            <option value="low">P3 低</option>
+            <option value="all">{t("全部优先级")}</option>
+            <option value="urgent">{t("P0 紧急")}</option>
+            <option value="high">{t("P1 高")}</option>
+            <option value="medium">{t("P2 中")}</option>
+            <option value="low">{t("P3 低")}</option>
           </select>
-          <button type="button" className="todo-clear-filter" onClick={clearFilters}>清除过滤</button>
+          <button type="button" className="todo-clear-filter" onClick={clearFilters}>{t("清除过滤")}</button>
         </div>
       </aside>
 
@@ -240,22 +242,22 @@ export function TodoList({
             <input
               value={quickText}
               onChange={(event) => setQuickText(event.target.value)}
-              placeholder="快速添加：明天 5 点 #标签 @项目 !P0"
+              placeholder={t("快速添加：明天 5 点 #标签 @项目 !P0")}
             />
             <button type="submit"><Send size={14} /></button>
           </form>
           <label className="todo-search">
             <Search size={14} />
-            <input value={searchText} onChange={(event) => setSearchText(event.target.value)} placeholder="搜索任务" />
+            <input value={searchText} onChange={(event) => setSearchText(event.target.value)} placeholder={t("搜索任务")} />
           </label>
-          <div className="todo-view-switch" aria-label="待办视图">
-            <button type="button" className={viewMode === "list" ? "active" : ""} onClick={() => setViewMode("list")}>列表</button>
-            <button type="button" className={viewMode === "grouped" ? "active" : ""} onClick={() => setViewMode("grouped")}>分组</button>
-            <button type="button" className={viewMode === "compact" ? "active" : ""} onClick={() => setViewMode("compact")}>紧凑</button>
+          <div className="todo-view-switch" aria-label={t("待办视图")}>
+            <button type="button" className={viewMode === "list" ? "active" : ""} onClick={() => setViewMode("list")}>{t("列表")}</button>
+            <button type="button" className={viewMode === "grouped" ? "active" : ""} onClick={() => setViewMode("grouped")}>{t("分组")}</button>
+            <button type="button" className={viewMode === "compact" ? "active" : ""} onClick={() => setViewMode("compact")}>{t("紧凑")}</button>
           </div>
         </div>
         <div className={`todo-work-list ${viewMode}`}>
-          {visibleTodos.length === 0 && <div className="empty">当前范围没有任务。</div>}
+          {visibleTodos.length === 0 && <div className="empty">{t("当前范围没有任务。")}</div>}
           {viewMode === "grouped"
             ? groupedTodos.map((group) => (
                 <section key={group.title} className="todo-group">

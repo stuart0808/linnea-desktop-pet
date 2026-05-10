@@ -1,4 +1,4 @@
-import type { AppSettings, ConversationMessage, ReminderItem, TodoItem, TodoPriority, TodoStatus } from "./types.js";
+import type { AppLanguage, AppSettings, ConversationMessage, ReminderItem, TodoItem, TodoPriority, TodoStatus } from "./types.js";
 
 function assertString(v: unknown, label: string): string {
   if (typeof v !== "string") throw new TypeError(`${label}: expected string, got ${typeof v}`);
@@ -97,7 +97,9 @@ export function assertAppSettings(v: unknown): AppSettings {
   if (!v || typeof v !== "object") throw new TypeError("AppSettings: expected object");
   const o = v as Record<string, unknown>;
   const provider = o["aiProvider"] === "openai" || o["aiProvider"] === "custom" ? o["aiProvider"] : "deepseek";
+  const language = isValidAppLanguage(o["language"]) ? o["language"] : "system";
   return {
+    language,
     aiProvider: provider,
     aiProviderName: assertStringOrUndefined(o["aiProviderName"], "aiProviderName"),
     aiBaseUrl: assertStringOrUndefined(o["aiBaseUrl"], "aiBaseUrl"),
@@ -129,4 +131,8 @@ export function assertAppSettings(v: unknown): AppSettings {
       ? o["petAppearance"] as AppSettings["petAppearance"]
       : undefined
   };
+}
+
+function isValidAppLanguage(value: unknown): value is AppLanguage {
+  return value === "system" || value === "zh-CN" || value === "en-US" || value === "ja-JP" || value === "ko-KR";
 }

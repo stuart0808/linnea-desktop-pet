@@ -23,14 +23,13 @@ export function formatRelativeTodoTime(todo: TodoItem) {
   return date.toLocaleString(undefined, { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
 
-export function formatSummaryRangeTitle(range: "today" | "week" | "month") {
+export function formatSummaryRangeTitle(range: "today" | "week" | "month", locale?: string) {
   const now = new Date();
   if (range === "week") {
     const start = startOfWeek(now);
     const end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 6);
-    return `${start.toLocaleDateString()} - ${end.toLocaleDateString()}`;
+    return `${start.toLocaleDateString(locale)} - ${end.toLocaleDateString(locale)}`;
   }
-  if (range === "month") return now.toLocaleDateString(undefined, { year: "numeric", month: "long" });
-  return now.toLocaleDateString();
+  if (range === "month") return now.toLocaleDateString(locale, { year: "numeric", month: "long" });
+  return now.toLocaleDateString(locale);
 }
-

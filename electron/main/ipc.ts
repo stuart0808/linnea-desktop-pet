@@ -37,11 +37,12 @@ import {
 import {
   setPetWindowExpanded, openWorkspaceWindow, openSelectionResultWindow,
   processSelectionResultInBackground, resizeSelectionPopoverWindow,
-  resolveAiConfig, beginWindowDrag, dragWindowToCursor, endWindowDrag, registerQuickAiRecordShortcut
+  resolveAiConfig, beginWindowDrag, dragWindowToCursor, endWindowDrag, registerQuickAiRecordShortcut, refreshTrayMenu
 } from "./window.js";
 import { checkForUpdates } from "./updates.js";
 import type { ChatResult, CodexDropItem, CodexSessionHistory, ConversationMessage, PetAppearance, ReminderItem, SelectionTextResult, TodoCandidate, TodoItem } from "../../shared/types.js";
 import type { OpenDialogOptions } from "electron";
+import { resolveLocale, translate } from "../../shared/i18n.js";
 
 const store = new JsonStore();
 
@@ -264,13 +265,14 @@ export function registerIpc(): void {
   ipcMain.handle("chat:testApi", async (_event, apiKeyOverride?: unknown): Promise<{ ok: boolean; message: string }> => {
     const settings = await store.getSettings();
     const ai = resolveAiConfig(settings, typeof apiKeyOverride === "string" ? apiKeyOverride : undefined);
+    const locale = resolveLocale(settings.language, app.getLocale());
     try {
-      await testAiConnection(ai);
-      return { ok: true, message: `${ai.providerName} 模型服务连接正常，模型 ${ai.model} 可用。` };
+      await testAiConnection({ ...ai, locale });
+      return { ok: true, message: translate(locale, "{provider} 模型服务连接正常，模型 {model} 可用。", { provider: ai.providerName ?? translate(locale, "模型服务"), model: ai.model }) };
     } catch (error) {
       return {
         ok: false,
-        message: error instanceof Error ? error.message : "连接测试失败。"
+        message: error instanceof Error ? error.message : translate(locale, "连接测试失败。")
       };
     }
   });
@@ -288,8 +290,10 @@ export function registerIpc(): void {
     const settings = await store.getSettings();
     const ai = resolveAiConfig(settings);
     const timeContext = getLocalTimeContext();
+    const locale = resolveLocale(settings.language, app.getLocale());
     const modelResult = await askPetAssistant({
       ...ai,
+      locale,
       text: trimmed,
       ...timeContext
     });
@@ -396,6 +400,7 @@ export function registerIpc(): void {
     app.setLoginItemSettings({ openAtLogin: next.launchAtLogin });
     if ("selectionToolsEnabled" in validPatch) await syncGlobalSelectionHook();
     if ("quickAiRecordShortcut" in validPatch) await registerQuickAiRecordShortcut();
+    if ("language" in validPatch) await refreshTrayMenu();
     broadcastSnapshotUpdated(_event.sender);
     return next;
   });
@@ -411,8 +416,10 @@ export function registerIpc(): void {
     const settings = await store.getSettings();
     const ai = resolveAiConfig(settings);
     const timeContext = getLocalTimeContext();
+    const locale = resolveLocale(settings.language, app.getLocale());
     return summarizeRecentContext({
       ...ai,
+      locale,
       messages: await store.listMessages(),
       todos: await store.listTodos(),
       ...timeContext
@@ -423,10 +430,12 @@ export function registerIpc(): void {
     const validAction = validateSelectionAction(action);
     const trimmed = validateSelectedText(text);
     const language = validateTargetLanguage(targetLanguage);
+    const settings = await store.getSettings();
+    const locale = resolveLocale(settings.language, app.getLocale());
     const result: SelectionTextResult = {
       id: randomUUID(),
       action: validAction,
-      title: validAction === "summarize" ? "Linnea 总结" : "Linnea 翻译",
+      title: validAction === "summarize" ? translate(locale, "Linnea 总结") : translate(locale, "Linnea 翻译"),
       markdown: "",
       status: "pending",
       targetLanguage: validAction === "translate" ? language : undefined,
@@ -460,7 +469,10 @@ export function registerIpc(): void {
   ipcMain.handle("selection:getResult", (_event, id: unknown) => state.selectionResults.get(validateStringId(id)) ?? null);
   ipcMain.handle("selection:getCapture", (_event, id: unknown) => state.selectionCaptures.get(validateStringId(id)) ?? null);
   ipcMain.handle("selection:resolveCapture", (_event, id: unknown) => resolveSelectionCapture(validateStringId(id)));
-  ipcMain.handle("selection:resizePopover", (_event, expanded: unknown) => resizeSelectionPopoverWindow(validateBoolean(expanded, "expanded")));
+  ipcMain.handle("selection:resizePopover", (_event, expanded: unknown, width?: unknown) => {
+    const safeWidth = typeof width === "number" && Number.isFinite(width) ? width : undefined;
+    resizeSelectionPopoverWindow(validateBoolean(expanded, "expanded"), safeWidth);
+  });
   ipcMain.handle("selection:createTodoFromCapture", async (_event, id: unknown) => {
     const capture = await resolveSelectionCapture(validateStringId(id));
     await openWorkspaceWindow();

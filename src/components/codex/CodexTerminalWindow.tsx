@@ -5,6 +5,7 @@ import { applyCodexThreadEventToSession, applyCodexUiEvent, getCodexActiveThread
 import { MarkdownText } from "./MarkdownText";
 import { CodexRequestCard, getCodexRequestActions, isCommandExecutionApprovalRequest } from "./CodexRequestCard";
 import { CodexActivityDrawer, CodexResumePicker, CodexSuggestionPicker, CodexThinkingMessage, CodexThreadBadges } from "./CodexUIComponents";
+import { useI18n } from "../../i18n";
 
 export function CodexTerminalWindow({
   api,
@@ -23,12 +24,13 @@ export function CodexTerminalWindow({
   approval: CodexApprovalPolicy;
   themeStyle: React.CSSProperties;
 }) {
+  const { t, locale } = useI18n();
   const startedRef = React.useRef(false);
   const messagesEndRef = React.useRef<HTMLDivElement | null>(null);
   const activeThreadIdRef = React.useRef<string | undefined>(undefined);
   const [session, setSession] = React.useState<CodexSessionInfo | null>(null);
   const [status, setStatus] = React.useState<"starting" | "running" | "exited" | "error">("starting");
-  const [statusText, setStatusText] = React.useState("正在启动 Codex...");
+  const [statusText, setStatusText] = React.useState(t("正在启动 Codex..."));
   const [saving, setSaving] = React.useState(false);
   const [input, setInput] = React.useState("");
   const [inputHistory, setInputHistory] = React.useState<string[]>([]);
@@ -82,7 +84,7 @@ export function CodexTerminalWindow({
     }).catch((error) => {
       if (!disposed) {
         setStatus("error");
-        setStatusText(error instanceof Error ? error.message : "读取会话失败。");
+        setStatusText(error instanceof Error ? error.message : t("读取会话失败。"));
       }
     });
     return () => {
@@ -111,17 +113,17 @@ export function CodexTerminalWindow({
           setSelectionReferences(latest.selectionReferences ?? []);
           if (latest.resumeStatus?.status === "resumeFailed") {
             setStatus("error");
-            setStatusText("线程恢复失败，请新建线程后继续。");
+            setStatusText(t("线程恢复失败，请新建线程后继续。"));
             return;
           }
         }
         setStatus("running");
-        setStatusText("Codex 已连接");
+        setStatusText(t("Codex 已连接"));
         void api.codex.listModels(sessionId).then(setModels).catch(() => undefined);
       })
       .catch((error) => {
         setStatus("error");
-        setStatusText(error instanceof Error ? error.message : "Codex 启动失败。");
+        setStatusText(error instanceof Error ? error.message : t("Codex 启动失败。"));
       });
   }, [api, approval, initialPrompt, sandbox, sessionId]);
 
@@ -168,10 +170,10 @@ export function CodexTerminalWindow({
       await api.codex.updateSessionHistory(session.id, { messages, activity });
       const next = await api.codex.saveSession(session.id);
       setSession(next);
-      setStatusText("会话已保存");
+      setStatusText(t("会话已保存"));
     } catch (error) {
       setStatus("error");
-      setStatusText(error instanceof Error ? error.message : "保存会话失败。");
+      setStatusText(error instanceof Error ? error.message : t("保存会话失败。"));
     } finally {
       setSaving(false);
     }
@@ -184,29 +186,29 @@ export function CodexTerminalWindow({
 
   const handleOpenPath = React.useCallback((path: string) => {
     if (!api?.app.openPath) {
-      setStatusText("Linnea 暂时无法打开该路径，请重启应用。");
+      setStatusText(t("Linnea 暂时无法打开该路径，请重启应用。"));
       return;
     }
     const targetPath = resolveCodexDisplayPath(path, session?.workspacePath);
     void api.app.openPath(targetPath).then((result) => {
-      if (!result.ok) setStatusText(result.message ?? "打开路径失败。");
+      if (!result.ok) setStatusText(result.message ?? t("打开路径失败。"));
     }).catch((error) => {
-      setStatusText(error instanceof Error ? error.message : "打开路径失败。");
+      setStatusText(error instanceof Error ? error.message : t("打开路径失败。"));
     });
   }, [api, session?.workspacePath]);
 
   async function newThread() {
     if (!api || !session) return;
     if (hasCurrentThreadPendingRequests()) {
-      setStatusText("当前线程还有待审批请求，请先允许或拒绝后再新建线程。");
+      setStatusText(t("当前线程还有待审批请求，请先允许或拒绝后再新建线程。"));
       return;
     }
     if (messages.length === 0 && activity.length === 0) {
-      setStatusText("当前线程还是空的");
+      setStatusText(t("当前线程还是空的"));
       return;
     }
     setStatus("starting");
-    setStatusText("正在新建线程...");
+    setStatusText(t("正在新建线程..."));
     try {
       await api.codex.updateSessionHistory(session.id, { messages, activity });
       const next = await api.codex.newThread(session.id);
@@ -223,26 +225,26 @@ export function CodexTerminalWindow({
       setSelectionReferences(next.selectionReferences ?? []);
       setSelectionReferencesExpanded(false);
       setStatus("running");
-      setStatusText("新线程已创建");
+      setStatusText(t("新线程已创建"));
     } catch (error) {
       setStatus("error");
-      setStatusText(error instanceof Error ? error.message : "新建线程失败。");
+      setStatusText(error instanceof Error ? error.message : t("新建线程失败。"));
     }
   }
 
   async function openResumePicker() {
     if (!api || !session) return;
     setResumeBusy(true);
-    setStatusText("正在读取可恢复线程...");
+    setStatusText(t("正在读取可恢复线程..."));
     try {
       await api.codex.updateSessionHistory(session.id, { messages, activity });
       const threads = await api.codex.listThreads(session.id);
       setResumeThreads(threads);
       setResumeIndex(0);
-      setStatusText(threads.length ? "选择要恢复的线程" : "没有找到可恢复线程");
+      setStatusText(threads.length ? t("选择要恢复的线程") : t("没有找到可恢复线程"));
     } catch (error) {
       setStatus("error");
-      setStatusText(error instanceof Error ? error.message : "读取可恢复线程失败。");
+      setStatusText(error instanceof Error ? error.message : t("读取可恢复线程失败。"));
     } finally {
       setResumeBusy(false);
     }
@@ -251,12 +253,12 @@ export function CodexTerminalWindow({
   async function resumeThread(threadId: string) {
     if (!api || !session) return;
     if (hasCurrentThreadPendingRequests()) {
-      setStatusText("当前线程还有待审批请求，请先允许或拒绝后再切换。");
+      setStatusText(t("当前线程还有待审批请求，请先允许或拒绝后再切换。"));
       return;
     }
     setResumeBusy(true);
     setStatus("starting");
-    setStatusText("正在切换线程...");
+    setStatusText(t("正在切换线程..."));
     try {
       const next = await api.codex.resumeThread(session.id, threadId);
       activeThreadIdRef.current = next.activeThreadId;
@@ -273,10 +275,10 @@ export function CodexTerminalWindow({
       setSelectionReferencesExpanded(false);
       setResumeThreads([]);
       setStatus("running");
-      setStatusText("线程已切换");
+      setStatusText(t("线程已切换"));
     } catch (error) {
       setStatus("error");
-      setStatusText(error instanceof Error ? error.message : "切换线程失败。");
+      setStatusText(error instanceof Error ? error.message : t("切换线程失败。"));
     } finally {
       setResumeBusy(false);
     }
@@ -285,7 +287,7 @@ export function CodexTerminalWindow({
   function handleComposerKeyDown(event: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) {
     if (activeCommandRequest) {
       const key = getRequestKey(activeCommandRequest.id);
-      const actions = getCodexRequestActions(activeCommandRequest);
+      const actions = getCodexRequestActions(activeCommandRequest, locale);
       const currentIndex = Math.min(requestActionIndex[key] ?? 0, Math.max(actions.length - 1, 0));
       const isResolvingActiveRequest = resolvingRequestId === activeCommandRequest.id;
       if (event.key === "ArrowDown" || event.key === "ArrowUp") {
@@ -385,7 +387,7 @@ export function CodexTerminalWindow({
       if (handledCommand) return;
       if (session?.resumeStatus?.status === "resumeFailed") {
         setStatus("error");
-        setStatusText("线程恢复失败，请新建线程后继续。");
+        setStatusText(t("线程恢复失败，请新建线程后继续。"));
         return;
       }
       setResponding(true);
@@ -394,7 +396,7 @@ export function CodexTerminalWindow({
       setSelectionReferencesExpanded(false);
     } catch (error) {
       setStatus("error");
-      setStatusText(error instanceof Error ? error.message : "发送失败。");
+      setStatusText(error instanceof Error ? error.message : t("发送失败。"));
     }
   }
 
@@ -413,7 +415,7 @@ export function CodexTerminalWindow({
     } catch (error) {
       setRequestErrors((current) => ({
         ...current,
-        [key]: error instanceof Error ? error.message : "提交审批失败。"
+        [key]: error instanceof Error ? error.message : t("提交审批失败。")
       }));
     } finally {
       setResolvingRequestId((current) => current === requestId ? null : current);
@@ -461,45 +463,45 @@ export function CodexTerminalWindow({
             )) ?? <span>加载中...</span>}
           </div>
           <div className="codex-session-meta">
-            <span>权限范围：{getCodexSandboxLabel(sandbox)}</span>
-            <span>执行前确认：{getCodexApprovalLabel(approval)}</span>
-            {session?.savedPath && <span>已保存: {session.savedPath}</span>}
+            <span>{t("权限范围")}：{t(getCodexSandboxLabel(sandbox))}</span>
+            <span>{t("执行前确认")}：{t(getCodexApprovalLabel(approval))}</span>
+            {session?.savedPath && <span>{t("已保存")}: {session.savedPath}</span>}
           </div>
           <button type="button" onClick={() => session && void api?.codex.openWorkspace(session.id)} disabled={!session}>
-            <FolderOpen size={14} /> 打开目录
+            <FolderOpen size={14} /> {t("打开目录")}
           </button>
           <button type="button" onClick={() => void saveSession()} disabled={!session || session.saved || saving}>
-            <Save size={14} /> {session?.saved ? "已保存" : saving ? "保存中..." : "保存会话"}
+            <Save size={14} /> {session?.saved ? t("已保存") : saving ? t("保存中...") : t("保存会话")}
           </button>
           <button type="button" onClick={() => void openResumePicker()} disabled={!session || status === "starting"}>
-            <ListTodo size={14} /> 线程
+            <ListTodo size={14} /> {t("线程")}
           </button>
           <button type="button" onClick={() => void newThread()} disabled={!session || status === "starting"}>
-            <Sparkles size={14} /> 新建线程
+            <Sparkles size={14} /> {t("新建线程")}
           </button>
           <button type="button" onClick={() => void stopSession()} disabled={!session || status !== "running"}>
-            <Square size={14} /> 停止
+            <Square size={14} /> {t("停止")}
           </button>
         </aside>
         <section className="codex-conversation">
           <div className="codex-message-list">
-            {messages.length === 0 && activity.length === 0 && <div className="codex-empty">Codex 正在准备会话。</div>}
+            {messages.length === 0 && activity.length === 0 && <div className="codex-empty">{t("Codex 正在准备会话。")}</div>}
             {messages.map((message) => (
               <div key={message.id} className={`codex-chat-message ${message.role}`}>
-                <strong>{message.role === "user" ? "你" : message.role === "assistant" ? "Codex" : "系统"}</strong>
+                <strong>{message.role === "user" ? t("你") : message.role === "assistant" ? "Codex" : t("系统")}</strong>
                 <MarkdownText text={message.text} onOpenPath={handleOpenPath} />
               </div>
             ))}
             {requests.length > 0 && (
-              <section className={`codex-request-stack ${requestsExpanded ? "expanded" : "collapsed"} ${requests.length > 1 ? "multi" : ""}`} aria-label="待审批请求">
+              <section className={`codex-request-stack ${requestsExpanded ? "expanded" : "collapsed"} ${requests.length > 1 ? "multi" : ""}`} aria-label={t("待审批请求")}>
                 <div className="codex-request-stack-header">
                   <div>
-                    <strong>待审批请求</strong>
-                    <span>{requests.length === 1 ? "1 个请求等待处理" : `${requests.length} 个请求等待处理`}</span>
+                    <strong>{t("待审批请求")}</strong>
+                    <span>{t("{count} 个请求等待处理", { count: requests.length })}</span>
                   </div>
                   {requests.length > 1 && (
                     <button type="button" onClick={() => setRequestsExpanded((current) => !current)}>
-                      {requestsExpanded ? "收起" : "展开全部"}
+                      {requestsExpanded ? t("收起") : t("展开全部")}
                     </button>
                   )}
                 </div>
@@ -523,22 +525,22 @@ export function CodexTerminalWindow({
           </div>
           <form className="codex-composer" onSubmit={sendMessage}>
             {selectionReferences.length > 0 && (
-              <section className={`codex-selection-reference-stack ${selectionReferencesExpanded ? "expanded" : "collapsed"} ${selectionReferences.length > 1 ? "multi" : ""}`} aria-label="划词引用内容">
+              <section className={`codex-selection-reference-stack ${selectionReferencesExpanded ? "expanded" : "collapsed"} ${selectionReferences.length > 1 ? "multi" : ""}`} aria-label={t("划词引用内容")}>
                 <div className="codex-selection-reference-header">
                   <div>
-                    <strong>引用内容</strong>
-                    <span>{selectionReferences.length === 1 ? "1 条划词引用将随问题发送" : `${selectionReferences.length} 条划词引用将随问题发送`}</span>
+                    <strong>{t("引用内容")}</strong>
+                    <span>{t("{count} 条划词引用将随问题发送", { count: selectionReferences.length })}</span>
                   </div>
                   {selectionReferences.length > 1 && (
                     <button type="button" onClick={() => setSelectionReferencesExpanded((current) => !current)}>
-                      {selectionReferencesExpanded ? "收起" : "展开全部"}
+                      {selectionReferencesExpanded ? t("收起") : t("展开全部")}
                     </button>
                   )}
                 </div>
                 <div className="codex-selection-reference-list">
                   {visibleSelectionReferences.map((reference, index) => (
                     <article key={reference.id} className="codex-selection-reference-item">
-                      <strong>引用 {index + 1}</strong>
+                      <strong>{t("引用 {index}", { index: index + 1 })}</strong>
                       <p>{reference.text}</p>
                     </article>
                   ))}
@@ -570,7 +572,7 @@ export function CodexTerminalWindow({
               <textarea value={input} rows={Math.min(10, Math.max(2, input.split(/\r?\n/).length))} onKeyDown={handleComposerKeyDown} onChange={(event) => {
                 setInput(event.target.value);
                 setInputHistoryIndex(null);
-              }} placeholder={selectionReferences.length ? "输入你想基于引用提出的问题..." : "输入指令，支持 /model、/review、/compact、@文件名..."} />
+              }} placeholder={selectionReferences.length ? t("输入你想基于引用提出的问题...") : t("输入指令，支持 /model、/review、/compact、@文件名...")} />
               <button type="submit" disabled={!input.trim() || status === "error" || session?.resumeStatus?.status === "resumeFailed"}>
                 <Send size={16} />
               </button>

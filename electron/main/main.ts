@@ -34,7 +34,7 @@ app.whenReady().then(async () => {
   await syncGlobalSelectionHook();
   await registerQuickAiRecordShortcut();
   try {
-    createTray();
+    await createTray();
   } catch {
     state.tray = null;
   }
