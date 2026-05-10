@@ -156,7 +156,7 @@ export function WorkspaceWindow() {
     showToast(t("已删除任务"));
   }
 
-  async function updateTodo(todo: TodoItem, patch: Partial<Pick<TodoItem, "title" | "notes" | "project" | "tags" | "priority" | "status" | "remindAt" | "dueAt" | "scheduledStartAt" | "scheduledEndAt" | "isAllDayScheduled" | "repeatRule" | "subtasks" | "attachments" | "completedAt">>) {
+  async function updateTodo(todo: TodoItem, patch: Partial<Pick<TodoItem, "title" | "notes" | "project" | "tags" | "priority" | "status" | "remindAt" | "dueAt" | "scheduledStartAt" | "scheduledEndAt" | "isAllDayScheduled" | "subtasks" | "attachments" | "completedAt">>) {
     if (!api) return;
     const updated = await api.todo.update(todo.id, patch);
     setTodos((current) => current.map((item) => (item.id === todo.id ? updated : item)));

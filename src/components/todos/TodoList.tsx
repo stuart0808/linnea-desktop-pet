@@ -1,5 +1,5 @@
 import React from "react";
-import { AlertTriangle, CalendarDays, Check, Clock, FileText, FolderOpen, Inbox, ListTodo, Paperclip, RotateCcw, Search, Send, Tag } from "lucide-react";
+import { AlertTriangle, CalendarDays, Check, Clock, FileText, FolderOpen, Inbox, ListTodo, Paperclip, Search, Send, Tag } from "lucide-react";
 import type { TodoItem, TodoPriority } from "../../../shared/types";
 import { startOfDay } from "../../utils/dateHelpers";
 import { getTodoTargetTime, compareTodosForWork, groupTodosForDisplay } from "../../utils/todoHelpers";
@@ -18,12 +18,12 @@ export function TodoList({
   todos: TodoItem[];
   focusedTodoId?: string | null;
   onToggle(todo: TodoItem): void;
-  onUpdate(todo: TodoItem, patch: Partial<Pick<TodoItem, "title" | "notes" | "project" | "tags" | "priority" | "status" | "remindAt" | "dueAt" | "scheduledStartAt" | "scheduledEndAt" | "isAllDayScheduled" | "repeatRule" | "subtasks" | "attachments" | "completedAt">>): void;
+  onUpdate(todo: TodoItem, patch: Partial<Pick<TodoItem, "title" | "notes" | "project" | "tags" | "priority" | "status" | "remindAt" | "dueAt" | "scheduledStartAt" | "scheduledEndAt" | "isAllDayScheduled" | "subtasks" | "attachments" | "completedAt">>): void;
   onDelete(todo: TodoItem): void;
   onQuickAdd(text: string): void;
 }) {
   const { t } = useI18n();
-  type TodoScope = "inbox" | "today" | "next7" | "overdue" | "all" | "done" | "repeating";
+  type TodoScope = "inbox" | "today" | "next7" | "overdue" | "all" | "done";
   type TodoViewMode = "list" | "grouped" | "compact";
   const [scope, setScope] = React.useState<TodoScope>("inbox");
   const [viewMode, setViewMode] = React.useState<TodoViewMode>("list");
@@ -65,7 +65,6 @@ export function TodoList({
         if (scope === "overdue" && (todo.status !== "open" || typeof targetTime !== "number" || targetTime > now)) return false;
         if (scope === "all" && todo.status !== "open") return false;
         if (scope === "done" && todo.status !== "done") return false;
-        if (scope === "repeating" && !todo.repeatRule) return false;
         if (selectedProject && todo.project !== selectedProject) return false;
         if (selectedTags.length && !selectedTags.every((tagName) => todo.tags?.includes(tagName))) return false;
         if (priorityFilter !== "all" && todo.priority !== priorityFilter) return false;
@@ -93,8 +92,7 @@ export function TodoList({
       return typeof time === "number" && time <= now;
     }).length, icon: <AlertTriangle size={15} /> },
     { id: "all", label: t("全部"), count: openTodos.length, icon: <ListTodo size={15} /> },
-    { id: "done", label: t("已完成"), count: doneTodos.length, icon: <Check size={15} /> },
-    { id: "repeating", label: t("重复任务"), count: todos.filter((todo) => todo.repeatRule).length, icon: <RotateCcw size={15} /> }
+    { id: "done", label: t("已完成"), count: doneTodos.length, icon: <Check size={15} /> }
   ];
 
   React.useEffect(() => {
@@ -156,7 +154,6 @@ export function TodoList({
               {todo.project && <small>@{todo.project}</small>}
               {(todo.dueAt || todo.remindAt) && <small>{formatRelativeTodoTime(todo)}</small>}
               {!!todo.subtasks?.length && <small>{t("{done}/{total} 子任务", { done: todo.subtasks.filter((subtask) => subtask.done).length, total: todo.subtasks.length })}</small>}
-              {todo.repeatRule && <small><RotateCcw size={11} /> {todo.repeatRule}</small>}
               {!!todo.attachments?.length && <small><Paperclip size={11} /> {todo.attachments.length}</small>}
               {!!todo.notes && <small><FileText size={11} /> {t("备注")}</small>}
             </span>

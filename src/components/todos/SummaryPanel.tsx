@@ -83,6 +83,22 @@ function CompactTodoList({ todos, emptyText, urgent = false }: { todos: TodoItem
 
 export { CompactTodoList };
 
+function formatSummaryRiskTime(todo: TodoItem, locale: string, t: (text: string, params?: Record<string, string | number>) => string) {
+  const source = todo.dueAt ?? todo.remindAt;
+  if (!source) return "";
+  const date = new Date(source);
+  if (!Number.isFinite(date.getTime())) return "";
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const tomorrowStart = todayStart.getTime() + 24 * 60 * 60_000;
+  const dayAfterTomorrowStart = tomorrowStart + 24 * 60 * 60_000;
+  const timeText = date.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" });
+  if (date.getTime() < Date.now()) return t("逾期 {time}", { time: date.toLocaleString(locale) });
+  if (date.getTime() < tomorrowStart) return t("今天 {time}", { time: timeText });
+  if (date.getTime() < dayAfterTomorrowStart) return t("明天 {time}", { time: timeText });
+  return date.toLocaleString(locale, { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
+
 export function SummaryPanel({
   todos,
   summaryText,
@@ -99,7 +115,7 @@ export function SummaryPanel({
   summaryError: string;
   onGenerateSummary(): void;
   onToggleTodo(todo: TodoItem): void;
-  onUpdateTodo(todo: TodoItem, patch: Partial<Pick<TodoItem, "title" | "notes" | "project" | "tags" | "priority" | "status" | "remindAt" | "dueAt" | "scheduledStartAt" | "scheduledEndAt" | "isAllDayScheduled" | "repeatRule" | "subtasks" | "attachments" | "completedAt">>): void;
+  onUpdateTodo(todo: TodoItem, patch: Partial<Pick<TodoItem, "title" | "notes" | "project" | "tags" | "priority" | "status" | "remindAt" | "dueAt" | "scheduledStartAt" | "scheduledEndAt" | "isAllDayScheduled" | "subtasks" | "attachments" | "completedAt">>): void;
   onQuickAdd(text: string): void;
 }) {
   const { t, locale } = useI18n();
@@ -217,8 +233,8 @@ export function SummaryPanel({
           data.risks.slice(0, 5).map((risk) => (
             <div key={`${risk.type}-${risk.todo.id}`} className="summary-risk-item">
               <strong>{risk.todo.title}</strong>
-              <span>{risk.label}</span>
-              {risk.detail && <small>{risk.detail}</small>}
+              <span>{t(risk.label)}</span>
+              {formatSummaryRiskTime(risk.todo, locale, t) && <small>{formatSummaryRiskTime(risk.todo, locale, t)}</small>}
               <div>
                 <button type="button" onClick={() => scheduleToday(risk.todo)}>{t("安排到今天")}</button>
                 <button type="button" onClick={() => postponeTomorrow(risk.todo)}>{t("延后")}</button>

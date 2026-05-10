@@ -2618,8 +2618,7 @@ input {
 }
 
 .todo-detail-header button,
-.todo-detail-delete,
-.todo-date-shortcuts button {
+.todo-detail-delete {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2660,12 +2659,6 @@ input {
   font-size: 13px;
   outline: none;
   resize: vertical;
-}
-
-.todo-date-shortcuts {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
 }
 
 .todo-detail-log {

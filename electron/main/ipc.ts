@@ -79,7 +79,6 @@ function createTodo(candidate: {
   priority?: TodoItem["priority"];
   dueAt?: string | null;
   remindAt?: string | null;
-  repeatRule?: string | null;
   subtasks?: TodoItem["subtasks"];
   attachments?: string[];
   confidence?: number;
@@ -97,7 +96,6 @@ function createTodo(candidate: {
     createdAt: now,
     dueAt: normalizeMaybeIso(candidate.dueAt),
     remindAt: normalizeMaybeIso(candidate.remindAt),
-    repeatRule: normalizeOptionalText(candidate.repeatRule),
     subtasks: normalizeSubtasksForTodo(candidate.subtasks),
     attachments: normalizeTextArray(candidate.attachments, 6),
     confidence: candidate.confidence,

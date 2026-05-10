@@ -177,7 +177,7 @@ export function validateSettingsPatch(value: unknown): Partial<AppSettings> {
 const ALLOWED_TODO_PATCH_KEYS = new Set<string>([
   "title", "notes", "project", "tags", "priority", "status",
   "dueAt", "remindAt", "scheduledStartAt", "scheduledEndAt",
-  "isAllDayScheduled", "repeatRule", "subtasks", "attachments", "completedAt"
+  "isAllDayScheduled", "subtasks", "attachments", "completedAt"
 ]);
 
 export function validateTodoPatch(value: unknown): Partial<TodoItem> {
@@ -197,7 +197,6 @@ export function validateTodoPatch(value: unknown): Partial<TodoItem> {
         break;
       case "notes":
       case "project":
-      case "repeatRule":
         sanitized[key] = sanitizeString(v, key, key === "notes" ? 4000 : 160);
         break;
       case "tags":
@@ -298,7 +297,6 @@ export function validateTodoCandidates(value: unknown): TodoCandidate[] {
       priority: input.priority === undefined || input.priority === null ? "medium" : sanitizeTodoPriority(input.priority, `todo candidate ${index}.priority`),
       dueAt: sanitizeIsoLike(input.dueAt, `todo candidate ${index}.dueAt`),
       remindAt: sanitizeIsoLike(input.remindAt, `todo candidate ${index}.remindAt`),
-      repeatRule: sanitizeString(input.repeatRule, `todo candidate ${index}.repeatRule`, 160),
       subtasks: sanitizeSubtasks(input.subtasks, `todo candidate ${index}.subtasks`) ?? [],
       attachments: sanitizeStringArray(input.attachments, `todo candidate ${index}.attachments`, 6, 500) ?? [],
       confidence

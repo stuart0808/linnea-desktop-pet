@@ -1,6 +1,5 @@
 import type { TodoItem, TodoPriority } from "../../shared/types";
 import { startOfDay, startOfWeek, isTimeInRange } from "./dateHelpers";
-import { formatRelativeTodoTime } from "./formatHelpers";
 
 export function getTodoTargetTime(todo: TodoItem) {
   const target = todo.remindAt ?? todo.dueAt;
@@ -102,8 +101,8 @@ export function buildSummaryRisks(todos: TodoItem[], now: number, weekStart: num
     const due = todo.dueAt ? new Date(todo.dueAt).getTime() : undefined;
     const remind = todo.remindAt ? new Date(todo.remindAt).getTime() : undefined;
     const scheduledThisWeek = scheduledInRange(todo, weekStart, weekEnd);
-    if (typeof due === "number" && due < now) risks.push({ todo, type: "overdue", label: "逾期未完成", detail: formatRelativeTodoTime(todo) });
-    else if (typeof due === "number" && due < now + 24 * 60 * 60_000 && !todo.scheduledStartAt) risks.push({ todo, type: "due24", label: "24h 内到期且未计划", detail: formatRelativeTodoTime(todo) });
+    if (typeof due === "number" && due < now) risks.push({ todo, type: "overdue", label: "逾期未完成" });
+    else if (typeof due === "number" && due < now + 24 * 60 * 60_000 && !todo.scheduledStartAt) risks.push({ todo, type: "due24", label: "24h 内到期且未计划" });
     else if (typeof remind === "number" && remind <= now) risks.push({ todo, type: "reminder", label: "提醒已到" });
     else if ((todo.priority === "urgent" || todo.priority === "high") && !scheduledThisWeek) risks.push({ todo, type: "priority", label: "高优先级但本周未计划" });
   }

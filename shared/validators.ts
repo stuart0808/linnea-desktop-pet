@@ -46,7 +46,6 @@ export function assertTodoItem(v: unknown): TodoItem {
   if (typeof o["scheduledStartAt"] === "string") item.scheduledStartAt = o["scheduledStartAt"];
   if (typeof o["scheduledEndAt"] === "string") item.scheduledEndAt = o["scheduledEndAt"];
   if (typeof o["isAllDayScheduled"] === "boolean") item.isAllDayScheduled = o["isAllDayScheduled"];
-  if (typeof o["repeatRule"] === "string") item.repeatRule = o["repeatRule"];
   if (typeof o["sourceMessage"] === "string") item.sourceMessage = o["sourceMessage"];
   if (typeof o["completedAt"] === "string") item.completedAt = o["completedAt"];
   if (typeof o["confirmedAt"] === "string") item.confirmedAt = o["confirmedAt"];

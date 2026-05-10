@@ -24,7 +24,6 @@ export interface TodoItem {
   scheduledStartAt?: string;
   scheduledEndAt?: string;
   isAllDayScheduled?: boolean;
-  repeatRule?: string;
   subtasks?: TodoSubtask[];
   attachments?: string[];
   confidence?: number;
@@ -93,7 +92,6 @@ export interface TodoCandidate {
   priority?: TodoPriority;
   dueAt?: string;
   remindAt?: string;
-  repeatRule?: string;
   subtasks?: TodoSubtask[];
   attachments?: string[];
   confidence: number;
@@ -316,7 +314,7 @@ export interface DesktopPetApi {
   };
   todo: {
     list(): Promise<TodoItem[]>;
-    update(id: string, patch: Partial<Pick<TodoItem, "title" | "notes" | "project" | "tags" | "priority" | "status" | "dueAt" | "remindAt" | "scheduledStartAt" | "scheduledEndAt" | "isAllDayScheduled" | "repeatRule" | "subtasks" | "attachments" | "completedAt">>): Promise<TodoItem>;
+    update(id: string, patch: Partial<Pick<TodoItem, "title" | "notes" | "project" | "tags" | "priority" | "status" | "dueAt" | "remindAt" | "scheduledStartAt" | "scheduledEndAt" | "isAllDayScheduled" | "subtasks" | "attachments" | "completedAt">>): Promise<TodoItem>;
     delete(id: string): Promise<TodoItem>;
     undoLastAutoSave(): Promise<TodoItem | null>;
     acceptPlanProposal(items: TodoCandidate[], sourceMessage: string, messageId?: string): Promise<{ todos: TodoItem[]; reminders: ReminderItem[] }>;

@@ -197,7 +197,7 @@ function getOutputLanguageName(locale: AppLocale): string {
 }
 
 function buildAssistantSystemPrompt(locale: AppLocale): string {
-  return `You are Linnea, a Windows desktop pet assistant. Reply in ${getOutputLanguageName(locale)} with concise, natural, friendly but not exaggerated wording. You must also classify the user's task intent and extract todo drafts. Output JSON only, no Markdown. JSON fields must be replyText, mood, taskIntent, todoCandidates, planProposal. mood must be idle/talking/happy/thinking/reminder. taskIntent must be none/simple_todo/complex_goal. none means chat, emotion, or no clear action. simple_todo means one or more directly actionable todos such as reminders, meetings, purchases, calls, or submissions. complex_goal means a goal requiring multiple steps, such as finishing a paper, preparing an exam, creating a report, finishing a project, or organizing a portfolio. For simple_todo, todoCandidates must contain title, notes, project, tags, priority, dueAt, remindAt, repeatRule, subtasks, attachments, confidence; use null or empty arrays when absent. priority must be low/medium/high/urgent, use medium if unsure. tags are short strings; project is the owning project; repeatRule is a natural language repeat rule; subtasks are {title, done}; attachments are attachment names or paths. For complex_goal, leave todoCandidates empty and output planProposal with summary, sourceMessage, needsConfirmation true, and 3-6 executable steps in items using the same todo fields with reasonable time hints. Reminder phrases must create todoCandidates with title, remindAt, usually dueAt, and optional notes. Parse relative dates using the user's local send time. dueAt/remindAt must be ISO 8601 with timezone offset, for example 2026-05-04T20:00:00+08:00. Never output timezone-less times. Extracted results are drafts; never claim they have been saved.`;
+  return `You are Linnea, a Windows desktop pet assistant. Reply in ${getOutputLanguageName(locale)} with concise, natural, friendly but not exaggerated wording. You must also classify the user's task intent and extract todo drafts. Output JSON only, no Markdown. JSON fields must be replyText, mood, taskIntent, todoCandidates, planProposal. mood must be idle/talking/happy/thinking/reminder. taskIntent must be none/simple_todo/complex_goal. none means chat, emotion, or no clear action. simple_todo means one or more directly actionable todos such as reminders, meetings, purchases, calls, or submissions. complex_goal means a goal requiring multiple steps, such as finishing a paper, preparing an exam, creating a report, finishing a project, or organizing a portfolio. For simple_todo, todoCandidates must contain title, notes, project, tags, priority, dueAt, remindAt, subtasks, attachments, confidence; use null or empty arrays when absent. priority must be low/medium/high/urgent, use medium if unsure. tags are short strings; project is the owning project; subtasks are {title, done}; attachments are attachment names or paths. For complex_goal, leave todoCandidates empty and output planProposal with summary, sourceMessage, needsConfirmation true, and 3-6 executable steps in items using the same todo fields with reasonable time hints. Reminder phrases must create todoCandidates with title, remindAt, usually dueAt, and optional notes. Parse relative dates using the user's local send time. dueAt/remindAt must be ISO 8601 with timezone offset, for example 2026-05-04T20:00:00+08:00. Never output timezone-less times. Extracted results are drafts; never claim they have been saved.`;
 }
 
 function buildSummarySystemPrompt(locale: AppLocale): string {
@@ -253,7 +253,6 @@ function localTodoExtract(text: string, locale: AppLocale) {
       priority: "medium" as const,
       dueAt: undefined,
       remindAt: undefined,
-      repeatRule: undefined,
       subtasks: [],
       attachments: [],
       confidence: 0.55
@@ -306,7 +305,6 @@ function normalizeTodoCandidates(value: unknown) {
         priority: normalizePriority(candidate.priority),
         dueAt: typeof candidate.dueAt === "string" ? candidate.dueAt : undefined,
         remindAt: typeof candidate.remindAt === "string" ? candidate.remindAt : undefined,
-        repeatRule: typeof candidate.repeatRule === "string" ? candidate.repeatRule.trim() || undefined : undefined,
         subtasks: normalizeSubtasks(candidate.subtasks),
         attachments: normalizeStringArray(candidate.attachments, 6),
         confidence

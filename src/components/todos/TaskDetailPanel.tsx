@@ -2,7 +2,7 @@ import React from "react";
 import { ListTodo, Save, Trash2 } from "lucide-react";
 import type { TodoItem, TodoPriority } from "../../../shared/types";
 import { splitDraftList } from "../../utils/todoHelpers";
-import { toDatetimeLocalValue, fromDatetimeLocalValue, nextMondayIso } from "../../utils/dateHelpers";
+import { toDatetimeLocalValue, fromDatetimeLocalValue } from "../../utils/dateHelpers";
 import { useI18n } from "../../i18n";
 
 export function TaskDetailPanel({
@@ -11,7 +11,7 @@ export function TaskDetailPanel({
   onDelete
 }: {
   todo: TodoItem | null;
-  onSave(todo: TodoItem, patch: Partial<Pick<TodoItem, "title" | "notes" | "project" | "tags" | "priority" | "status" | "remindAt" | "dueAt" | "scheduledStartAt" | "scheduledEndAt" | "isAllDayScheduled" | "repeatRule" | "subtasks" | "attachments" | "completedAt">>): void;
+  onSave(todo: TodoItem, patch: Partial<Pick<TodoItem, "title" | "notes" | "project" | "tags" | "priority" | "status" | "remindAt" | "dueAt" | "scheduledStartAt" | "scheduledEndAt" | "isAllDayScheduled" | "subtasks" | "attachments" | "completedAt">>): void;
   onDelete(todo: TodoItem): void;
 }) {
   const { t, locale } = useI18n();
@@ -25,7 +25,6 @@ export function TaskDetailPanel({
   const [scheduledStartAt, setScheduledStartAt] = React.useState("");
   const [scheduledEndAt, setScheduledEndAt] = React.useState("");
   const [isAllDayScheduled, setIsAllDayScheduled] = React.useState(false);
-  const [repeatRule, setRepeatRule] = React.useState("");
   const [subtasks, setSubtasks] = React.useState("");
   const [notes, setNotes] = React.useState("");
   const [attachments, setAttachments] = React.useState("");
@@ -41,7 +40,6 @@ export function TaskDetailPanel({
     setScheduledStartAt(toDatetimeLocalValue(todo?.scheduledStartAt));
     setScheduledEndAt(toDatetimeLocalValue(todo?.scheduledEndAt));
     setIsAllDayScheduled(todo?.isAllDayScheduled === true);
-    setRepeatRule(todo?.repeatRule ?? "");
     setSubtasks((todo?.subtasks ?? []).map((subtask) => subtask.title).join("\n"));
     setNotes(todo?.notes ?? "");
     setAttachments((todo?.attachments ?? []).join("\n"));
@@ -63,7 +61,6 @@ export function TaskDetailPanel({
       scheduledStartAt: fromDatetimeLocalValue(scheduledStartAt),
       scheduledEndAt: fromDatetimeLocalValue(scheduledEndAt),
       isAllDayScheduled,
-      repeatRule: repeatRule.trim() || undefined,
       subtasks: splitDraftList(subtasks).map((item, index) => ({
         id: todo.subtasks?.[index]?.id,
         title: item,
@@ -118,12 +115,6 @@ export function TaskDetailPanel({
           </select>
         </label>
       </div>
-      <div className="todo-date-shortcuts">
-        <button type="button" onClick={() => setDueAt(toDatetimeLocalValue(new Date().toISOString()))}>{t("今天")}</button>
-        <button type="button" onClick={() => setDueAt(toDatetimeLocalValue(new Date(Date.now() + 24 * 60 * 60_000).toISOString()))}>{t("明天")}</button>
-        <button type="button" onClick={() => setDueAt(toDatetimeLocalValue(nextMondayIso()))}>{t("下周一")}</button>
-        <button type="button" onClick={() => setDueAt("")}>{t("清除")}</button>
-      </div>
       <div className="task-pane-grid">
         <label>
           {t("截止")}
@@ -168,10 +159,6 @@ export function TaskDetailPanel({
       <label>
         {t("标签")}
         <input value={tags} onChange={(event) => setTags(event.target.value)} placeholder={t("用逗号分隔")} />
-      </label>
-      <label>
-        {t("重复")}
-        <input value={repeatRule} onChange={(event) => setRepeatRule(event.target.value)} placeholder={t("例如 每周五，或留空")} />
       </label>
       <label>
         {t("子任务")}

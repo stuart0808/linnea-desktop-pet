@@ -6,7 +6,8 @@ import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, delimiter, extname, isAbsolute, join, sep } from "node:path";
 import WebSocket from "ws";
-import type { CodexApprovalPolicy, CodexClearCacheResult, CodexCopiedItem, CodexCreateSessionOptions, CodexDropItem, CodexPendingRequest, CodexReasoningEffort, CodexSandboxPolicy, CodexSavedSession, CodexSessionHistory, CodexSessionInfo, CodexStartOptions, CodexThreadMode, CodexThreadSettings, SelectionReference } from "../../shared/types.js";
+import type { AppLocale, CodexApprovalPolicy, CodexClearCacheResult, CodexCopiedItem, CodexCreateSessionOptions, CodexDropItem, CodexPendingRequest, CodexReasoningEffort, CodexSandboxPolicy, CodexSavedSession, CodexSessionHistory, CodexSessionInfo, CodexStartOptions, CodexThreadMode, CodexThreadSettings, SelectionReference } from "../../shared/types.js";
+import { resolveLocale, translate } from "../../shared/i18n.js";
 import { state, type CodexRuntimeSession } from "./state.js";
 import { JsonStore } from "./storage.js";
 import { broadcastCodexEvent } from "./broadcast.js";
@@ -735,7 +736,8 @@ export async function sendCodexInput(session: CodexRuntimeSession, text: string)
   const sandbox = normalizeCodexSandbox(session.startOptions?.sandbox);
   const threadSettings = getActiveCodexThreadSettings(session);
   const references = sanitizeSelectionReferences(session.selectionReferences);
-  const inputText = references.length ? withSelectionReferences(text, references) : text;
+  const locale = resolveLocale((await store.getSettings()).language, app.getLocale());
+  const inputText = references.length ? withSelectionReferences(text, references, locale) : text;
   const turnText = threadSettings.mode === "plan" ? withCodexPlanModeInstruction(inputText) : inputText;
   const params = {
     threadId: session.threadId,
@@ -757,11 +759,11 @@ export async function sendCodexInput(session: CodexRuntimeSession, text: string)
   }
 }
 
-function withSelectionReferences(question: string, references: SelectionReference[]): string {
+function withSelectionReferences(question: string, references: SelectionReference[], locale: AppLocale): string {
   const body = references
-    .map((reference, index) => `[引用 ${index + 1}]\n${reference.text.trim()}`)
+    .map((reference, index) => `[${translate(locale, "引用 {index}", { index: index + 1 })}]\n${reference.text.trim()}`)
     .join("\n\n");
-  return `我想基于以下引用内容提问：\n\n${body}\n\n我的问题是：\n${question.trim()}`;
+  return `${translate(locale, "我想基于以下引用内容提问：")}\n\n${body}\n\n${translate(locale, "我的问题是：")}\n${question.trim()}`;
 }
 
 function getActiveCodexThreadSettings(session: CodexRuntimeSession): CodexThreadSettings {
@@ -783,11 +785,16 @@ function stripCodexPlanModeInstruction(text: string): string {
 }
 
 function stripSelectionAskPrompt(text: string): string {
-  const marker = "\n\n我的问题是：";
-  if (!text.startsWith("我想基于以下引用内容提问：\n\n")) return text;
-  const index = text.lastIndexOf(marker);
-  if (index < 0) return text;
-  return text.slice(index + marker.length).trimStart();
+  const locales: AppLocale[] = ["zh-CN", "en-US", "ja-JP", "ko-KR"];
+  for (const locale of locales) {
+    const prefix = `${translate(locale, "我想基于以下引用内容提问：")}\n\n`;
+    const marker = `\n\n${translate(locale, "我的问题是：")}`;
+    if (!text.startsWith(prefix)) continue;
+    const index = text.lastIndexOf(marker);
+    if (index < 0) return text;
+    return text.slice(index + marker.length).trimStart();
+  }
+  return text;
 }
 
 function stripHiddenCodexPromptText(text: string): string {

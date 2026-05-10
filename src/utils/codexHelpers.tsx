@@ -1,5 +1,6 @@
 import React from "react";
 import type {
+  AppLocale,
   CodexApprovalPolicy,
   CodexDropItem,
   CodexModelSummary,
@@ -12,6 +13,7 @@ import type {
   CodexUiMessage,
   DesktopPetApi
 } from "../../shared/types";
+import { translate } from "../../shared/i18n";
 import { codexSlashCommands } from "./constants";
 
 export type CodexInputSuggestion = {
@@ -202,11 +204,16 @@ export function stripCodexPlanModeInstruction(text: string) {
 }
 
 export function stripSelectionAskPrompt(text: string) {
-  const marker = "\n\n我的问题是：";
-  if (!text.startsWith("我想基于以下引用内容提问：\n\n")) return text;
-  const index = text.lastIndexOf(marker);
-  if (index < 0) return text;
-  return text.slice(index + marker.length).trimStart();
+  const locales: AppLocale[] = ["zh-CN", "en-US", "ja-JP", "ko-KR"];
+  for (const locale of locales) {
+    const prefix = `${translate(locale, "我想基于以下引用内容提问：")}\n\n`;
+    const marker = `\n\n${translate(locale, "我的问题是：")}`;
+    if (!text.startsWith(prefix)) continue;
+    const index = text.lastIndexOf(marker);
+    if (index < 0) return text;
+    return text.slice(index + marker.length).trimStart();
+  }
+  return text;
 }
 
 export function stripHiddenCodexPromptText(text: string) {

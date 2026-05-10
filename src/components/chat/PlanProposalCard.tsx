@@ -4,6 +4,7 @@ import type { PlanProposal, TodoCandidate, TodoPriority } from "../../../shared/
 import { formatPriority } from "../../utils/formatHelpers";
 import { formatPlanTime, toDatetimeLocalValue, fromDatetimeLocalValue } from "../../utils/dateHelpers";
 import { splitDraftList } from "../../utils/todoHelpers";
+import { useI18n } from "../../i18n";
 
 export function PlanProposalCard({
   plan,
@@ -22,6 +23,7 @@ export function PlanProposalCard({
   onDismiss(): void;
   onChangeItems(items: TodoCandidate[]): void;
 }) {
+  const { t } = useI18n();
   const [editingIndex, setEditingIndex] = React.useState<number | null>(null);
   const visibleItems = compact ? plan.items.slice(0, 4) : plan.items;
 
@@ -40,13 +42,13 @@ export function PlanProposalCard({
     <section className={`plan-card ${compact ? "compact" : ""}`}>
       <div className="plan-card-header">
         <div>
-          <strong>{plan.summary || "任务草案"}</strong>
+          <strong>{plan.summary || t("任务草案")}</strong>
           <span>
             {status === "accepted"
-              ? "已确认保存"
+              ? t("已确认保存")
               : status === "dismissed"
-                ? "未采纳，保留为历史草案"
-                : "AI 只生成草案，确认后才会保存"}
+                ? t("未采纳，保留为历史草案")
+                : t("AI 只生成草案，确认后才会保存")}
           </span>
         </div>
         <Sparkles size={16} />
@@ -61,22 +63,22 @@ export function PlanProposalCard({
                   <input
                     value={item.title}
                     onChange={(event) => updateItem(index, { title: event.target.value })}
-                    placeholder="任务内容"
+                    placeholder={t("任务内容")}
                   />
                   <div className="draft-edit-grid">
                     <input
                       value={item.project ?? ""}
                       onChange={(event) => updateItem(index, { project: event.target.value || undefined })}
-                      placeholder="项目"
+                      placeholder={t("项目")}
                     />
                     <select
                       value={item.priority ?? "medium"}
                       onChange={(event) => updateItem(index, { priority: event.target.value as TodoPriority })}
                     >
-                      <option value="low">低</option>
-                      <option value="medium">中</option>
-                      <option value="high">高</option>
-                      <option value="urgent">紧急</option>
+                      <option value="low">{t("低")}</option>
+                      <option value="medium">{t("中")}</option>
+                      <option value="high">{t("高")}</option>
+                      <option value="urgent">{t("紧急")}</option>
                     </select>
                   </div>
                   <div className="draft-edit-grid">
@@ -84,41 +86,36 @@ export function PlanProposalCard({
                       value={toDatetimeLocalValue(item.dueAt)}
                       onChange={(event) => updateItem(index, { dueAt: fromDatetimeLocalValue(event.target.value) })}
                       type="datetime-local"
-                      title="截止时间"
-                    />
-                    <input
-                      value={item.repeatRule ?? ""}
-                      onChange={(event) => updateItem(index, { repeatRule: event.target.value || undefined })}
-                      placeholder="重复，例如每周五"
+                      title={t("截止时间")}
                     />
                   </div>
                   <input
                     value={(item.tags ?? []).join(", ")}
                     onChange={(event) => updateItem(index, { tags: splitDraftList(event.target.value) })}
-                    placeholder="标签，用逗号分隔"
+                    placeholder={t("标签，用逗号分隔")}
                   />
                   <textarea
                     value={item.notes ?? ""}
                     onChange={(event) => updateItem(index, { notes: event.target.value || undefined })}
-                    placeholder="备注"
+                    placeholder={t("备注")}
                     rows={2}
                   />
                   <input
                     value={(item.subtasks ?? []).map((subtask) => subtask.title).join(", ")}
                     onChange={(event) => updateItem(index, { subtasks: splitDraftList(event.target.value).map((title) => ({ title, done: false })) })}
-                    placeholder="子任务，用逗号分隔"
+                    placeholder={t("子任务，用逗号分隔")}
                   />
                   <input
                     value={(item.attachments ?? []).join(", ")}
                     onChange={(event) => updateItem(index, { attachments: splitDraftList(event.target.value) })}
-                    placeholder="备注附件名称/路径，用逗号分隔"
+                    placeholder={t("备注附件名称/路径，用逗号分隔")}
                   />
                   <div className="draft-actions">
                     <button type="button" onClick={() => setEditingIndex(null)} disabled={busy}>
-                      <Check size={14} /> 完成
+                      <Check size={14} /> {t("完成")}
                     </button>
                     <button type="button" onClick={() => discardItem(index)} disabled={busy}>
-                      <Trash2 size={14} /> 丢弃
+                      <Trash2 size={14} /> {t("丢弃")}
                     </button>
                   </div>
                 </div>
@@ -126,21 +123,20 @@ export function PlanProposalCard({
                 <>
                   <strong>{item.title}</strong>
                   <div className="draft-meta">
-                    {item.project && <small>项目：{item.project}</small>}
-                    <small>优先级：{formatPriority(item.priority)}</small>
-                    {(item.remindAt || item.dueAt) && <small>截止：{formatPlanTime(item.dueAt ?? item.remindAt)}</small>}
-                    {item.repeatRule && <small>重复：{item.repeatRule}</small>}
-                    {!!item.tags?.length && <small>标签：{item.tags.join(" / ")}</small>}
+                    {item.project && <small>{t("项目：{value}", { value: item.project })}</small>}
+                    <small>{t("优先级：{value}", { value: t(formatPriority(item.priority)) })}</small>
+                    {(item.remindAt || item.dueAt) && <small>{t("截止：{value}", { value: formatPlanTime(item.dueAt ?? item.remindAt) })}</small>}
+                    {!!item.tags?.length && <small>{t("标签：{value}", { value: item.tags.join(" / ") })}</small>}
                   </div>
                   {item.notes && !compact && <p>{item.notes}</p>}
-                  {!!item.subtasks?.length && !compact && <p>子任务：{item.subtasks.map((subtask) => subtask.title).join("；")}</p>}
-                  {!!item.attachments?.length && !compact && <p>附件：{item.attachments.join("；")}</p>}
+                  {!!item.subtasks?.length && !compact && <p>{t("子任务：{value}", { value: item.subtasks.map((subtask) => subtask.title).join("；") })}</p>}
+                  {!!item.attachments?.length && !compact && <p>{t("附件：{value}", { value: item.attachments.join("；") })}</p>}
                   <div className="draft-actions">
                     <button type="button" onClick={() => setEditingIndex(index)} disabled={busy || status !== "pending"}>
-                      <Pencil size={14} /> 编辑
+                      <Pencil size={14} /> {t("编辑")}
                     </button>
                     <button type="button" onClick={() => discardItem(index)} disabled={busy || status !== "pending"}>
-                      <Trash2 size={14} /> 丢弃
+                      <Trash2 size={14} /> {t("丢弃")}
                     </button>
                   </div>
                 </>
@@ -149,22 +145,22 @@ export function PlanProposalCard({
           </div>
         ))}
         {compact && plan.items.length > visibleItems.length && (
-          <div className="plan-more">还有 {plan.items.length - visibleItems.length} 个步骤</div>
+          <div className="plan-more">{t("还有 {count} 个步骤", { count: plan.items.length - visibleItems.length })}</div>
         )}
       </div>
       {status === "pending" ? (
         <div className="plan-actions">
           <button type="button" onClick={onAccept} disabled={busy || !plan.items.length}>
-            <Check size={14} /> {busy ? "写入中..." : "确认写入"}
+            <Check size={14} /> {busy ? t("写入中...") : t("确认写入")}
           </button>
           <button type="button" onClick={onDismiss} disabled={busy}>
-            <X size={14} /> 暂不写入
+            <X size={14} /> {t("暂不写入")}
           </button>
         </div>
       ) : (
         <div className={`draft-status ${status}`}>
           {status === "accepted" ? <Check size={14} /> : <X size={14} />}
-          {status === "accepted" ? "用户已确认保存" : "用户未采纳"}
+          {status === "accepted" ? t("用户已确认保存") : t("用户未采纳")}
         </div>
       )}
     </section>

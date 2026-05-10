@@ -437,7 +437,7 @@ export function CodexTerminalWindow({
       <header className="codex-window-header">
         <div>
           <strong>Linnea Codex</strong>
-          <span>{session?.workspacePath ?? "加载工作目录..."}</span>
+          <span>{session?.workspacePath ?? t("加载工作目录...")}</span>
         </div>
         <div className={`codex-status ${status}`}>{statusText}</div>
         {session && (
@@ -453,14 +453,14 @@ export function CodexTerminalWindow({
       </header>
       <section className="codex-window-body">
         <aside className="codex-session-panel">
-          <strong>{session?.copiedItems.length ? "副本文件" : "临时提问"}</strong>
+          <strong>{session?.copiedItems.length ? t("副本文件") : t("临时提问")}</strong>
           <div className="codex-session-items">
             {session?.copiedItems.map((item) => (
               <div key={item.copiedPath}>
                 <FileText size={13} />
                 <span>{item.copiedName}</span>
               </div>
-            )) ?? <span>加载中...</span>}
+            )) ?? <span>{t("加载中...")}</span>}
           </div>
           <div className="codex-session-meta">
             <span>{t("权限范围")}：{t(getCodexSandboxLabel(sandbox))}</span>
